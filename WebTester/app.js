@@ -20,7 +20,7 @@ function makeStage(){
  const tDry=ctx.createGain(),tWet=ctx.createGain(),tSum=ctx.createGain();
  eq.connect(out);eq.connect(pass);pass.connect(subtract);subtract.connect(out);
  pass.connect(dDry);pass.connect(dWet);dDry.connect(dSum);dWet.connect(comp);comp.connect(dCompWet);dCompWet.connect(dSum);
- dSum.connect(tDry);dSum.connect(tWet);tDry.connect(tSum);
+ dSum.connect(tDry);dSum.connect(tWet);tDry.connect(tSum);tSum.connect(out);
  return{eq,pass,out,subtract,dDry,dWet,dSum,comp,dCompWet,tDry,tWet,tSum,transient:null};
 }
 async function ensureGraph(){
@@ -30,7 +30,7 @@ async function ensureGraph(){
  if(ctx.audioWorklet){for(const s of stages)if(!s.transient){try{s.transient=await createBandTransientNode()}catch(e){console.warn('Band transient disabled:',e)}}}
  syncEQ();syncDenoise();syncTransient();
 }
-async function createBandTransientNode(){await ctx.audioWorklet.addModule('transient-processor.js?v=9');return new AudioWorkletNode(ctx,'myefx-transient',{parameterData:{attack:0,sustain:0}})}
+async function createBandTransientNode(){await ctx.audioWorklet.addModule('transient-processor.js?v=10');return new AudioWorkletNode(ctx,'myefx-transient',{parameterData:{attack:0,sustain:0}})}
 function syncEQ(){for(let i=1;i<=4;i++){const s=stages[i-1],f=Number($('freq'+i).value),q=Number($('q'+i).value),g=Number($('gain'+i).value);s.eq.frequency.value=f;s.eq.Q.value=q;s.eq.gain.value=g;s.pass.frequency.value=f;s.pass.Q.value=q}}
 function syncDenoise(){for(let i=1;i<=4;i++){const a=Number($('denoise'+i).value)/100,s=stages[i-1];s.dDry.gain.value=1-a;s.dWet.gain.value=a;s.comp.threshold.value=-60+a*35;s.comp.ratio.value=1+a*39}}
 function syncTransient(){for(let i=1;i<=4;i++){const s=stages[i-1],node=s.transient;if(!node)continue;const a=Number($('attack'+i).value),su=Number($('sustain'+i).value);const mix=Math.min(1,(Math.abs(a)+Math.abs(su))/200);s.tDry.gain.value=1-mix;s.tWet.gain.value=mix;const ap=node.parameters.get('attack'),sp=node.parameters.get('sustain');if(ap)ap.setValueAtTime(a,ctx.currentTime);if(sp)sp.setValueAtTime(su,ctx.currentTime)}}
@@ -38,15 +38,10 @@ function disconnectGraph(){try{source?.disconnect();gainNode?.disconnect();stage
 function connectPlaybackChain(){
  if(!source||!gainNode||!stages.length)return;
  disconnectGraph();
- if(bypass){source.connect(gainNode)}else{
-  let node=source;
-  for(const s of stages){node.connect(s.eq);node=s.out;}
-  node.connect(gainNode);
- }
+ if(bypass){source.connect(gainNode)}else{let node=source;for(const s of stages){node.connect(s.eq);node=s.out}node.connect(gainNode)}
  gainNode.connect(ctx.destination);
 }
 function routeTransient(s){if(s.transient){s.tWet.connect(s.transient);s.transient.connect(s.tSum)}else{s.tWet.connect(s.tSum)}}
-for(const s of stages)routeTransient(s);
 function saveCurrent(){const d={bands:[]};for(let i=1;i<=4;i++)d.bands.push({freq:Number($('freq'+i).value),gain:Number($('gain'+i).value),q:Number($('q'+i).value),denoise:Number($('denoise'+i).value),attack:Number($('attack'+i).value),sustain:Number($('sustain'+i).value)});if($('ab').textContent.endsWith('A'))slotA=d;else slotB=d}
 function loadSlot(){const d=$('ab').textContent.endsWith('A')?slotA:slotB;for(let i=1;i<=4;i++){const b=d.bands[i-1];$('freq'+i).value=b.freq;$('gain'+i).value=b.gain;$('q'+i).value=b.q;$('denoise'+i).value=b.denoise??0;$('attack'+i).value=b.attack??0;$('sustain'+i).value=b.sustain??0}updateOut();syncEQ();syncDenoise();syncTransient()}
 async function loadFile(file){try{if(!file)return;if(!file.type.startsWith('audio/')&&!/\.(wav|wave|aif|aiff|mp3|flac|m4a|ogg)$/i.test(file.name))throw new Error('請選擇音訊檔案。');if(!ctx)ctx=new AudioContext();const data=await file.arrayBuffer();buffer=await ctx.decodeAudioData(data.slice(0));playOffset=0;drawWaveform();setCursor(0);$('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s｜可以按播放`}catch(e){buffer=null;$('status').textContent='音檔載入失敗：'+(e?.message||e);console.error(e)}}
