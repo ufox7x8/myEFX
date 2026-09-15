@@ -10,14 +10,19 @@ function updateOut(){
  $('transOut').value=`${$('trans').value}%`;
  $('denoiseOut').value=`${$('denoise').value}%`;
 }
-function syncToNode(){if(!filter)return; filter.frequency.value=Number($('freq').value);filter.gain.value=Number($('gain').value);filter.Q.value=Number($('q').value);}
+function connectGraph(){
+ if(!ctx||!filter||!gainNode)return;
+ try{filter.disconnect();gainNode.disconnect()}catch{}
+ if(bypass)gainNode.connect(ctx.destination);else filter.connect(gainNode);
+}
+function syncToNode(){if(!filter)return;filter.frequency.value=Number($('freq').value);filter.gain.value=Number($('gain').value);filter.Q.value=Number($('q').value);connectGraph();}
 function saveCurrent(){const o={freq:Number($('freq').value),gain:Number($('gain').value),q:Number($('q').value)};if($('ab').textContent.endsWith('A'))slotA=o;else slotB=o;}
 function loadSlot(){const o=$('ab').textContent.endsWith('A')?slotA:slotB;$('freq').value=o.freq;$('gain').value=o.gain;$('q').value=o.q;updateOut();syncToNode();}
 function ensureGraph(){
  if(!ctx)ctx=new AudioContext();
  if(!gainNode){gainNode=ctx.createGain();gainNode.gain.value=1;}
  if(!filter){filter=ctx.createBiquadFilter();filter.type='peaking';filter.frequency.value=1000;filter.gain.value=0;filter.Q.value=1;}
- filter.disconnect();gainNode.disconnect();filter.connect(gainNode);gainNode.connect(ctx.destination);
+ connectGraph();
 }
 async function loadFile(file){
  try{ctx=ctx||new AudioContext();const ab=await file.arrayBuffer();buffer=await ctx.decodeAudioData(ab);$('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s`;}
@@ -35,6 +40,6 @@ $('drop').addEventListener('dragleave',()=>$('drop').style.borderColor='#555');
 $('drop').addEventListener('drop',e=>{e.preventDefault();$('drop').style.borderColor='#555';const f=e.dataTransfer.files[0];if(f)loadFile(f)});
 ['freq','gain','q','dyn','trans','denoise'].forEach(id=>$(id).addEventListener('input',()=>{updateOut();saveCurrent();syncToNode()}));
 $('play').onclick=start;$('stop').onclick=stop;
-$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;if(filter)filter.bypass=bypass};
+$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;connectGraph()};
 $('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};
 updateOut();
