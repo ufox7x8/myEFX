@@ -54,25 +54,30 @@ jobs:
               'drawProcessedDifference',
               'myefx-denoise',
               'denoise-processor.js?v=balanced4',
-              'transient-processor.js?v=clean4'
+              'transient-processor.js?v=clean4',
+              'deltaBand'
           ]
           required_dn=[
-              'decision-directed Wiener + log-MMSE style gain',
-              'this.noisePower',
-              'this.prevCleanPower',
-              'this.prevSpp',
-              'this.mask'
+              'this.BANDS=64',
+              'this.bandNoise',
+              'this.bandGain',
+              'updateBandGate',
+              'Multiband-gate behavior'
           ]
+          forbidden_dn=['decision-directed Wiener','log-MMSE','noisePower','prevCleanPower','prevSpp']
           missing=[('HTML',x) for x in required_html if x not in html]
           missing += [('APP',x) for x in required_app if x not in app]
           missing += [('DENOISE',x) for x in required_dn if x not in dn]
+          bad_dn=[x for x in forbidden_dn if x in dn]
+          if bad_dn:
+              raise SystemExit('Obsolete Wiener/log-MMSE denoise remains: '+', '.join(bad_dn))
           if missing:
               raise SystemExit('DSP contract failed: '+', '.join(f'{a}:{b}' for a,b in missing))
           forbidden=['legacy-file-loader.js','io-fix.js','file-io-hardfix.js','app-loader-repair.js','four-band-fix.js','knob-ui.js','perf-fix.js']
           bad=[x for x in forbidden if x in html or x in app]
           if bad:
               raise SystemExit('Obsolete patch layer still referenced: '+', '.join(bad))
-          print('4-band / DELTA / adaptive spectral denoise / difference-only spectrogram validation OK')
+          print('4-band / RX-style multiband de-noise / DELTA / difference-only spectrogram validation OK')
           PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
