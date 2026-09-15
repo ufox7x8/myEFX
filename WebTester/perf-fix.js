@@ -8,7 +8,7 @@
   if(!input||!output||!canvas)return;
   const token=++fastRenderToken,frame=512,w=Math.max(640,Math.min(1000,Math.floor(canvas.clientWidth))),h=Math.max(180,Math.min(360,Math.floor(canvas.clientHeight)));
   canvas.width=w;canvas.height=h;
-  const g=canvas.getContext('2d',{alpha:false}),top=Math.min(86,Math.max(64,Math.round(h*.22))),specH=h-top);
+  const g=canvas.getContext('2d',{alpha:false}),top=Math.min(86,Math.max(64,Math.round(h*.22))),specH=h-top;
   g.fillStyle='#02080c';g.fillRect(0,0,w,h);
   const inL=input.getChannelData(0),inR=input.numberOfChannels>1?input.getChannelData(1):inL,outL=output.getChannelData(0),outR=output.numberOfChannels>1?output.getChannelData(1):outL;
   const inRe=new Float32Array(frame),inIm=new Float32Array(frame),outRe=new Float32Array(frame),outIm=new Float32Array(frame),win=new Float32Array(frame);
@@ -22,7 +22,8 @@
     for(let n=0;n<frame;n++){const ii=Math.max(0,Math.min(input.length-1,start+n)),oi=Math.max(0,Math.min(output.length-1,start+n));inRe[n]=((inL[ii]+inR[ii])*.5)*win[n];inIm[n]=0;outRe[n]=((outL[oi]+outR[oi])*.5)*win[n];outIm[n]=0}
     fft(inRe,inIm);fft(outRe,outIm);
     for(let y=top;y<h;y++){
-     const f=20*Math.pow(1000,1-(y-top)/Math.max(1,specH-1)),bin=Math.max(1,Math.min(frame>>1,Math.round(f*frame/input.sampleRate)));
+     const f=20*Math.pow(1000,1-(y-top)/Math.max(1,specH-1));
+     const bin=Math.max(1,Math.min(frame>>1,Math.round(f*frame/input.sampleRate)));
      const idb=20*Math.log10(Math.hypot(inRe[bin],inIm[bin])/frame+1e-8),odb=20*Math.log10(Math.hypot(outRe[bin],outIm[bin])/frame+1e-8),color=paintDiff(odb-idb);
      if(color){g.fillStyle=color;g.fillRect(x,y,1,1)}
     }
@@ -36,7 +37,9 @@
   if(!audio||!canvas)return;
   const token=++fastRenderToken,frame=512,w=Math.max(640,Math.min(1000,Math.floor(canvas.clientWidth))),h=Math.max(180,Math.min(360,Math.floor(canvas.clientHeight)));
   canvas.width=w;canvas.height=h;
-  const g=canvas.getContext('2d',{alpha:false}),top=Math.min(86,Math.max(64,Math.round(h*.22))),specH=h-top),dataL=audio.getChannelData(0),dataR=audio.numberOfChannels>1?audio.getChannelData(1):dataL;
+  const g=canvas.getContext('2d',{alpha:false});
+  const top=Math.min(86,Math.max(64,Math.round(h*.22))),specH=h-top;
+  const dataL=audio.getChannelData(0),dataR=audio.numberOfChannels>1?audio.getChannelData(1):dataL;
   g.fillStyle='#02080c';g.fillRect(0,0,w,h);
   const re=new Float32Array(frame),im=new Float32Array(frame),win=new Float32Array(frame);
   for(let i=0;i<frame;i++)win[i]=.5-.5*Math.cos(2*Math.PI*i/(frame-1));
