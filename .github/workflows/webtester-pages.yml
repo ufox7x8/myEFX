@@ -31,37 +31,24 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-          node --check WebTester/knob-ui.js
-          node --check WebTester/file-io-hardfix.js
-          node --check WebTester/four-band-fix.js
-      - name: Validate deployed 4-band entry
+      - name: Validate clean 4-band entry
         run: |
           python - <<'PY'
           from pathlib import Path
           s=Path('WebTester/index-fixed.html').read_text(encoding='utf-8')
-          required=[
-              '4-BAND SPECTRAL DYNAMIC PROCESSOR',
-              'defaults=[31.5,125,1000,8000]',
-              'const knobDefs',
-              'data-action="bypass"',
-              'data-action="delta"',
-              'class="knob"',
-              'for="file"',
-              'file-io-hardfix.js'
-          ]
+          required=['4-BAND SPECTRAL DYNAMIC PROCESSOR','DEFAULT_FREQ=[31.5,125,1000,8000]','data-action="bypass"','data-action="delta"','class="knob"','for="file"','app.js?v=1']
           missing=[x for x in required if x not in s]
-          if missing:
-              raise SystemExit('Missing UI markers: '+', '.join(missing))
-          forbidden=['legacy-file-loader.js','io-fix.js']
+          if missing: raise SystemExit('Missing clean rebuild markers: '+', '.join(missing))
+          forbidden=['legacy-file-loader.js','io-fix.js','file-io-hardfix.js','app-loader-repair.js','four-band-fix.js','knob-ui.js']
           present=[x for x in forbidden if x in s]
-          if present:
-              raise SystemExit('Obsolete I/O layer must not be deployed: '+', '.join(present))
-          print('Clean 4-band + hardened file I/O validation OK')
+          if present: raise SystemExit('Obsolete patch layer still referenced: '+', '.join(present))
+          print('Clean native 4-band entry validation OK')
           PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
         run: |
+          rm -rf _site
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
