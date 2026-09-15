@@ -5,32 +5,28 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>myEFX Web Tester</title>
 <style>
-body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}main{max-width:1200px;margin:auto;padding:24px}.drop{border:2px dashed #555;border-radius:14px;padding:28px;text-align:center;margin-bottom:18px}.row{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px}.controls{display:grid;gap:10px}label{display:grid;grid-template-columns:100px 1fr 70px;gap:8px;align-items:center}input[type=range]{width:100%}button{padding:10px 14px;border:0;border-radius:8px;cursor:pointer}.transport{display:flex;gap:8px;flex-wrap:wrap}.status{margin-top:10px;color:#aaa}.small{font-size:12px;color:#999}.section{margin-top:18px}.transient-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.badge{font-size:12px;color:#aaa;margin-left:8px}@media(max-width:800px){.row,.transient-grid{grid-template-columns:1fr}}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}main{max-width:1200px;margin:auto;padding:24px}.drop{border:2px dashed #555;border-radius:14px;padding:28px;text-align:center;margin-bottom:18px;transition:.15s}.drop.drag{border-color:#fff;background:#181818}.row{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px}.controls{display:grid;gap:10px}label{display:grid;grid-template-columns:100px 1fr 70px;gap:8px;align-items:center}input[type=range]{width:100%}button{padding:10px 14px;border:0;border-radius:8px;cursor:pointer}.transport{display:flex;gap:8px;flex-wrap:wrap}.status{margin-top:10px;color:#aaa}.small{font-size:12px;color:#999}.section{margin-top:18px}.badge{font-size:12px;color:#aaa;margin-left:8px}@media(max-width:800px){.row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <main>
 <h1>myEFX Web Tester</h1>
-<p class="small">4-band EQ + Attack / Sustain Transient 測試版。Chrome / Edge 建議使用。</p>
-<div id="drop" class="drop">把 WAV / AIFF 拖到這裡，或 <input id="file" type="file" accept="audio/*"></div>
-<div class="transport">
-<button id="play">播放</button><button id="stop">停止</button><button id="bypass">Bypass：OFF</button><button id="ab">A/B：A</button>
-</div>
+<p class="small">4-band EQ + 每 Band 頻率/Q 限定 De-noise + Attack / Sustain。</p>
+<div id="drop" class="drop">把 WAV / AIFF 拖到這裡，或 <button id="choose">選擇音檔</button><input id="file" type="file" accept="audio/*" hidden></div>
+<div class="transport"><button id="play">播放</button><button id="stop">停止</button><button id="bypass">Bypass：OFF</button><button id="ab">A/B：A</button></div>
 <div class="status" id="status">尚未載入音檔。</div>
 
-<div class="section"><h2>4-Band EQ</h2><div class="row">
-<div class="card"><h3>Band 1</h3><div class="controls"><label>Freq<input id="freq1" type="range" min="20" max="20000" value="100" step="1"><output id="freq1Out">100 Hz</output></label><label>Gain<input id="gain1" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain1Out">0.0 dB</output></label><label>Q<input id="q1" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q1Out">1.00</output></label></div></div>
-<div class="card"><h3>Band 2</h3><div class="controls"><label>Freq<input id="freq2" type="range" min="20" max="20000" value="500" step="1"><output id="freq2Out">500 Hz</output></label><label>Gain<input id="gain2" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain2Out">0.0 dB</output></label><label>Q<input id="q2" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q2Out">1.00</output></label></div></div>
-<div class="card"><h3>Band 3</h3><div class="controls"><label>Freq<input id="freq3" type="range" min="20" max="20000" value="2000" step="1"><output id="freq3Out">2000 Hz</output></label><label>Gain<input id="gain3" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain3Out">0.0 dB</output></label><label>Q<input id="q3" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q3Out">1.00</output></label></div></div>
-<div class="card"><h3>Band 4</h3><div class="controls"><label>Freq<input id="freq4" type="range" min="20" max="20000" value="8000" step="1"><output id="freq4Out">8000 Hz</output></label><label>Gain<input id="gain4" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain4Out">0.0 dB</output></label><label>Q<input id="q4" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q4Out">1.00</output></label></div></div>
+<div class="section"><h2>4-Band EQ + 每 Band De-noise</h2><div class="row">
+<div class="card"><h3>Band 1</h3><div class="controls"><label>Freq<input id="freq1" type="range" min="20" max="20000" value="100" step="1"><output id="freq1Out">100 Hz</output></label><label>Gain<input id="gain1" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain1Out">0.0 dB</output></label><label>Q<input id="q1" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q1Out">1.00</output></label><label>De-noise<input id="denoise1" type="range" min="0" max="100" value="0"><output id="denoise1Out">0%</output></label><p class="small">只處理本 Band 設定的中心頻率與 Q 頻寬。</p></div></div>
+<div class="card"><h3>Band 2</h3><div class="controls"><label>Freq<input id="freq2" type="range" min="20" max="20000" value="500" step="1"><output id="freq2Out">500 Hz</output></label><label>Gain<input id="gain2" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain2Out">0.0 dB</output></label><label>Q<input id="q2" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q2Out">1.00</output></label><label>De-noise<input id="denoise2" type="range" min="0" max="100" value="0"><output id="denoise2Out">0%</output></label><p class="small">只處理本 Band 設定的中心頻率與 Q 頻寬。</p></div></div>
+<div class="card"><h3>Band 3</h3><div class="controls"><label>Freq<input id="freq3" type="range" min="20" max="20000" value="2000" step="1"><output id="freq3Out">2000 Hz</output></label><label>Gain<input id="gain3" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain3Out">0.0 dB</output></label><label>Q<input id="q3" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q3Out">1.00</output></label><label>De-noise<input id="denoise3" type="range" min="0" max="100" value="0"><output id="denoise3Out">0%</output></label><p class="small">只處理本 Band 設定的中心頻率與 Q 頻寬。</p></div></div>
+<div class="card"><h3>Band 4</h3><div class="controls"><label>Freq<input id="freq4" type="range" min="20" max="20000" value="8000" step="1"><output id="freq4Out">8000 Hz</output></label><label>Gain<input id="gain4" type="range" min="-24" max="24" value="0" step="0.1"><output id="gain4Out">0.0 dB</output></label><label>Q<input id="q4" type="range" min="0.1" max="20" value="1" step="0.01"><output id="q4Out">1.00</output></label><label>De-noise<input id="denoise4" type="range" min="0" max="100" value="0"><output id="denoise4Out">0%</output></label><p class="small">只處理本 Band 設定的中心頻率與 Q 頻寬。</p></div></div>
 </div></div>
 
-<div class="section"><h2>Transient <span class="badge">目前是寬頻測試 DSP，後續會改成 frequency-selective</span></h2><div class="transient-grid">
-<div class="card"><h3>Attack</h3><div class="controls"><label>Amount<input id="attack" type="range" min="-100" max="100" value="0"><output id="attackOut">0%</output></label><p class="small">正值：加強前緣；負值：壓平前緣。</p></div></div>
-<div class="card"><h3>Sustain</h3><div class="controls"><label>Amount<input id="sustain" type="range" min="-100" max="100" value="0"><output id="sustainOut">0%</output></label><p class="small">正值：拉長尾部；負值：收短尾部。</p></div></div>
+<div class="section"><h2>Transient <span class="badge">寬頻測試版</span></h2><div class="row">
+<div class="card"><h3>Attack</h3><div class="controls"><label>Amount<input id="attack" type="range" min="-100" max="100" value="0"><output id="attackOut">0%</output></label><p class="small">正值加強前緣；負值壓平前緣。</p></div></div>
+<div class="card"><h3>Sustain</h3><div class="controls"><label>Amount<input id="sustain" type="range" min="-100" max="100" value="0"><output id="sustainOut">0%</output></label><p class="small">正值加強尾部；負值壓低尾部。</p></div></div>
 </div></div>
-
-<div class="section"><div class="card"><h2>De-noise（預留）</h2><label>Amount<input id="denoise" type="range" min="0" max="100" value="0"><output id="denoiseOut">0%</output></label><p class="small">下一階段接頻率選擇式 De-noise。</p></div></div>
 </main>
 <script src="app.js"></script>
 </body>
