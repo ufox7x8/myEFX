@@ -32,7 +32,6 @@ jobs:
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
           node --check WebTester/knob-ui.js
-          node --check WebTester/legacy-file-loader.js
           node --check WebTester/four-band-fix.js
       - name: Validate deployed 4-band entry
         run: |
@@ -46,13 +45,12 @@ jobs:
               'data-action="bypass"',
               'data-action="delta"',
               'class="knob"',
-              'legacy-file-loader.js'
           ]
           missing=[x for x in required if x not in s]
           if missing:
               raise SystemExit('Missing UI markers: '+', '.join(missing))
-          if 'io-fix.js' in s:
-              raise SystemExit('Layered io-fix.js must not be deployed')
+          if 'io-fix.js' in s or 'legacy-file-loader.js' in s:
+              raise SystemExit('Obsolete layered file-loader patch must not be deployed')
           print('Clean 4-band entry validation OK')
           PY
       - name: Setup Pages
