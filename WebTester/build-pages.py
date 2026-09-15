@@ -1,19 +1,25 @@
 from pathlib import Path
-import re
 
 root=Path('WebTester')
 app=root/'app.js'
 html=root/'index.html'
 s=app.read_text(encoding='utf-8')
 
+def replace_between(text,start_marker,end_marker,replacement):
+    a=text.find(start_marker)
+    if a<0: raise SystemExit(f'not found: {start_marker}')
+    b=text.find(end_marker,a)
+    if b<0: raise SystemExit(f'not found: {end_marker}')
+    return text[:a]+replacement+text[b:]
+
 make_stage="""function makeStage(){
  const eq=ctx.createBiquadFilter();eq.type='peaking';const pass=ctx.createBiquadFilter();pass.type='bandpass';const subtract=ctx.createGain();subtract.gain.value=-1;const out=ctx.createGain();
  const dDry=ctx.createGain(),dWet=ctx.createGain(),dSum=ctx.createGain();
  const tDry=ctx.createGain(),tWet=ctx.createGain(),tSum=ctx.createGain();eq.connect(out);eq.connect(pass);pass.connect(subtract);subtract.connect(out);pass.connect(dDry);pass.connect(dWet);dDry.connect(dSum);dWet.connect(dSum);dSum.connect(tDry);dSum.connect(tWet);tDry.connect(tSum);tSum.connect(out);
  return{eq,pass,subtract,out,dDry,dWet,dSum,tDry,tWet,tSum,denoise:null,transient:null};
-}"""
-s,n=re.subn(r"function makeStage\(\)\{.*?\n\}",make_stage,s,count=1,flags=re.S)
-if n!=1: raise SystemExit('makeStage patch failed')
+}
+"""
+s=replace_between(s,'function makeStage(){','function syncEQ()',make_stage)
 
 create_nodes="""async function createDenoise(stage){
  if(!ctx.audioWorklet||stage.denoise)return;
@@ -32,20 +38,17 @@ async function createTransient(stage){
   try{stage.tWet.disconnect()}catch{}
   stage.tWet.connect(stage.transient);stage.transient.connect(stage.tSum);
  }catch(e){stage.transient=null;console.warn('Transient fallback:',e)}
-}"""
-s,n=re.subn(r"async function createDenoise\(stage\)\{.*?async function createTransient\(stage\)\{.*?\n\}",create_nodes,s,count=1,flags=re.S)
-if n!=1: raise SystemExit('create nodes patch failed')
-
-ensure="""async function ensureGraph(){
+}
+async function ensureGraph(){
  if(!ctx)ctx=new AudioContext();
  if(stages.length===0)for(let i=0;i<4;i++)stages.push(makeStage());
  if(!outputGain)outputGain=ctx.createGain();
  if(!analyser){analyser=ctx.createAnalyser();analyser.fftSize=2048;analyser.smoothingTimeConstant=.02}
  for(const stage of stages){await createDenoise(stage);await createTransient(stage)}
  syncAll();
-}"""
-s,n=re.subn(r"async function ensureGraph\(\)\{.*?\n\}",ensure,s,count=1,flags=re.S)
-if n!=1: raise SystemExit('ensureGraph patch failed')
+}
+"""
+s=replace_between(s,'async function createDenoise(stage){','function syncEQ()',create_nodes)
 
 sync_adv="""function readDenoiseControls(i){
  const g=id=>Number($(id).value);
@@ -57,9 +60,9 @@ function syncDenoise(){
   if(s.denoise){const set=(name,v)=>{const p=s.denoise.parameters.get(name);if(p)p.setValueAtTime(v,ctx.currentTime)};set('amount',amount*100);set('threshold',c.threshold);set('reduction',c.reduction);set('attack',c.attack);set('release',c.release);set('adaptive',c.mode);set('optimize',c.optimize);set('filterType',c.filter);set('noiseType',c.noiseType);set('adaptationTime',c.adaptation);set('softKnee',c.knee);set('maxAttenuation',c.maxAtt);set('dynamicProfile',c.dynamic)}
   const out=(id,v)=>{const e=$(id);if(e)e.textContent=v};out('dnThreshold'+i+'Out',c.threshold.toFixed(1)+' dB');out('dnReduction'+i+'Out',c.reduction.toFixed(1)+' dB');out('dnAdapt'+i+'Out',c.adaptation.toFixed(1)+' s');out('dnKnee'+i+'Out',Math.round(c.knee)+'%');out('dnAttack'+i+'Out',Math.round(c.attack)+' ms');out('dnRelease'+i+'Out',Math.round(c.release)+' ms');out('dnMaxAtt'+i+'Out',c.maxAtt.toFixed(1)+' dB');
  }
-}"""
-s,n=re.subn(r"function syncDenoise\(\)\{.*?\n\}",sync_adv,s,count=1,flags=re.S)
-if n!=1: raise SystemExit('syncDenoise patch failed')
+}
+"""
+s=replace_between(s,'function syncDenoise(){','function syncTransient()',sync_adv)
 
 marker="$('play').onclick=()=>playing?stop():start();"
 advanced_bind="""for(let i=1;i<=4;i++){
@@ -69,12 +72,15 @@ advanced_bind="""for(let i=1;i<=4;i++){
 }
 
 $('play').onclick=()=>playing?stop():start();"""
+if marker not in s: raise SystemExit('play marker not found')
 s=s.replace(marker,advanced_bind,1)
 app.write_text(s,encoding='utf-8')
 
 h=html.read_text(encoding='utf-8')
 if 'denoise-ui.js' not in h:
- h=h.replace('<script src="app.js?v=41"></script>','<script src="denoise-ui.js?v=1"></script>\n<script src="app.js?v=60"></script>')
- h=h.replace('<script src="app.js?v=30"></script>','<script src="denoise-ui.js?v=1"></script>\n<script src="app.js?v=60"></script>')
+    for old in ('<script src="app.js?v=41"></script>','<script src="app.js?v=30"></script>'):
+        if old in h:
+            h=h.replace(old,'<script src="denoise-ui.js?v=1"></script>\n<script src="app.js?v=60"></script>')
+            break
 html.write_text(h,encoding='utf-8')
 print('Patched WebTester for advanced De-noise controls')
