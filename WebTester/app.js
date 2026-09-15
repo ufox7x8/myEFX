@@ -1,135 +1,23 @@
-let ctx=null, buffer=null, source=null, gainNode=null, transientNode=null;
-let filters=[], playing=false, bypass=false;
-const bandDefaults=[
- {freq:100,gain:0,q:1},
- {freq:500,gain:0,q:1},
- {freq:2000,gain:0,q:1},
- {freq:8000,gain:0,q:1}
-];
-let slotA={bands:structuredClone(bandDefaults),attack:0,sustain:0};
-let slotB={bands:structuredClone(bandDefaults),attack:0,sustain:0};
+let ctx=null,buffer=null,source=null,gainNode=null,transientNode=null;
+let stages=[],playing=false,bypass=false;
+const defaults=[{freq:100,gain:0,q:1,denoise:0},{freq:500,gain:0,q:1,denoise:0},{freq:2000,gain:0,q:1,denoise:0},{freq:8000,gain:0,q:1,denoise:0}];
+let slotA={bands:structuredClone(defaults),attack:0,sustain:0};
+let slotB={bands:structuredClone(defaults),attack:0,sustain:0};
 const $=id=>document.getElementById(id);
-function fmt(v,unit=''){return `${Number(v).toFixed(unit==='Hz'?0:unit==='dB'?1:2)} ${unit}`.trim()}
-function updateOut(){
- for(let i=1;i<=4;i++){
-   $(`freq${i}Out`).value=fmt($(`freq${i}`).value,'Hz');
-   $(`gain${i}Out`).value=fmt($(`gain${i}`).value,'dB');
-   $(`q${i}Out`).value=fmt($(`q${i}`).value,'');
- }
- $('attackOut').value=`${$('attack').value}%`;
- $('sustainOut').value=`${$('sustain').value}%`;
- $('denoiseOut').value=`${$('denoise').value}%`;
-}
-function ensureGraph(){
- if(!ctx)ctx=new AudioContext();
- if(filters.length===0){
-   for(let i=1;i<=4;i++){
-     const f=ctx.createBiquadFilter();
-     f.type='peaking';
-     filters.push(f);
-   }
- }
- if(!gainNode){gainNode=ctx.createGain();gainNode.gain.value=1;}
- if(!transientNode)createTransientNode().catch(e=>{
-   console.error(e);
-   $('status').textContent='Transient 初始化失敗：'+e.message;
- });
- syncEQ();
- syncTransient();
-}
-async function createTransientNode(){
- if(transientNode)return;
- await ctx.audioWorklet.addModule('transient-processor.js');
- transientNode=new AudioWorkletNode(ctx,'myefx-transient',{parameterData:{attack:0,sustain:0}});
-}
-function syncEQ(){
- for(let i=1;i<=4;i++){
-   const f=filters[i-1];
-   f.frequency.value=Number($(`freq${i}`).value);
-   f.gain.value=Number($(`gain${i}`).value);
-   f.Q.value=Number($(`q${i}`).value);
- }
-}
-function syncTransient(){
- if(!transientNode)return;
- const a=transientNode.parameters.get('attack');
- const s=transientNode.parameters.get('sustain');
- if(a)a.setValueAtTime(Number($('attack').value),ctx.currentTime);
- if(s)s.setValueAtTime(Number($('sustain').value),ctx.currentTime);
-}
-function disconnectGraph(){
- try{gainNode?.disconnect();transientNode?.disconnect();filters.forEach(f=>f.disconnect());}catch{}
-}
-function connectPlaybackChain(){
- if(!source||!filters.length||!gainNode||!transientNode)return;
- disconnectGraph();
- source.disconnect();
- if(bypass){
-   source.connect(gainNode);
- }else{
-   source.connect(filters[0]);
-   for(let i=0;i<filters.length-1;i++)filters[i].connect(filters[i+1]);
-   filters[3].connect(transientNode);
-   transientNode.connect(gainNode);
- }
- gainNode.connect(ctx.destination);
-}
-function saveCurrent(){
- const data={bands:[],attack:Number($('attack').value),sustain:Number($('sustain').value)};
- for(let i=1;i<=4;i++)data.bands.push({freq:Number($(`freq${i}`).value),gain:Number($(`gain${i}`).value),q:Number($(`q${i}`).value)});
- if($('ab').textContent.endsWith('A'))slotA=data;else slotB=data;
-}
-function loadSlot(){
- const o=$('ab').textContent.endsWith('A')?slotA:slotB;
- for(let i=1;i<=4;i++){
-   $('freq'+i).value=o.bands[i-1].freq;
-   $('gain'+i).value=o.bands[i-1].gain;
-   $('q'+i).value=o.bands[i-1].q;
- }
- $('attack').value=o.attack;
- $('sustain').value=o.sustain;
- updateOut();syncEQ();syncTransient();
-}
-async function loadFile(file){
- try{
-   if(!ctx)ctx=new AudioContext();
-   if(!file.type.startsWith('audio/')&&!/\.(wav|wave|aif|aiff|mp3|flac|m4a|ogg)$/i.test(file.name))throw new Error('請選擇音訊檔案。');
-   const ab=await file.arrayBuffer();
-   buffer=await ctx.decodeAudioData(ab.slice(0));
-   $('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s｜可以按播放`;
- }catch(e){buffer=null;$('status').textContent='音檔載入失敗：'+(e?.message||e);}
-}
-async function start(){
- if(!buffer){$('status').textContent='請先載入 WAV / AIFF。';return;}
- try{
-   if(!ctx)ctx=new AudioContext();
-   ensureGraph();
-   await ctx.resume();
-   if(!transientNode)await createTransientNode();
-   syncEQ();syncTransient();
-   if(ctx.state!=='running')throw new Error(`AudioContext 狀態：${ctx.state}`);
-   if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null;}
-   source=ctx.createBufferSource();
-   source.buffer=buffer;
-   source.onended=()=>{playing=false;source=null;if($('status').textContent.startsWith('播放中'))$('status').textContent='播放結束';};
-   connectPlaybackChain();
-   source.start(0);
-   playing=true;
-   $('status').textContent=`播放中｜${buffer.sampleRate} Hz｜4 Band EQ + Transient`;
- }catch(e){playing=false;$('status').textContent='播放失敗：'+(e?.message||e);console.error(e);}
-}
-function stop(){
- if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null;}
- playing=false;$('status').textContent='已停止';
-}
-$('file').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0])});
-$('drop').addEventListener('dragover',e=>{e.preventDefault();$('drop').style.borderColor='#999';e.dataTransfer.dropEffect='copy'});
-$('drop').addEventListener('dragleave',()=>$('drop').style.borderColor='#555');
-$('drop').addEventListener('drop',e=>{e.preventDefault();$('drop').style.borderColor='#555';const f=e.dataTransfer.files[0];if(f)loadFile(f)});
-for(let i=1;i<=4;i++)['freq','gain','q'].forEach(p=>$(p+i).addEventListener('input',()=>{updateOut();saveCurrent();syncEQ()}));
-['attack','sustain','denoise'].forEach(id=>$(id).addEventListener('input',()=>{updateOut();saveCurrent();syncTransient()}));
-$('play').onclick=start;
-$('stop').onclick=stop;
-$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;if(source)connectPlaybackChain()};
-$('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};
-updateOut();
+function fmt(v,u=''){return `${Number(v).toFixed(u==='Hz'?0:u==='dB'?1:2)} ${u}`.trim()}
+function updateOut(){for(let i=1;i<=4;i++){$(`freq${i}Out`).value=fmt($(`freq${i}`).value,'Hz');$(`gain${i}Out`).value=fmt($(`gain${i}`).value,'dB');$(`q${i}Out`).value=fmt($(`q${i}`).value,'');$(`denoise${i}Out`).value=`${$('denoise'+i).value}%`}$('attackOut').value=`${$('attack').value}%`;$('sustainOut').value=`${$('sustain').value}%`}
+function makeStage(){const eq=ctx.createBiquadFilter();eq.type='peaking';const pass=ctx.createBiquadFilter();pass.type='bandpass';const stop=ctx.createBiquadFilter();stop.type='notch';const comp=ctx.createDynamicsCompressor();comp.attack.value=.003;comp.release.value=.08;comp.knee.value=12;comp.ratio.value=20;const wet=ctx.createGain(),dry=ctx.createGain(),sum=ctx.createGain();eq.connect(dry);eq.connect(pass);eq.connect(stop);pass.connect(comp);comp.connect(wet);dry.connect(sum);wet.connect(sum);return{eq,pass,stop,comp,wet,dry,sum}}
+function ensureGraph(){if(!ctx)ctx=new AudioContext();if(stages.length===0)for(let i=0;i<4;i++)stages.push(makeStage());if(!gainNode){gainNode=ctx.createGain();gainNode.gain.value=1}if(!transientNode)createTransientNode().catch(e=>console.error(e));syncEQ();syncDenoise();syncTransient()}
+async function createTransientNode(){if(transientNode)return;await ctx.audioWorklet.addModule('transient-processor.js?4');transientNode=new AudioWorkletNode(ctx,'myefx-transient',{parameterData:{attack:0,sustain:0}})}
+function syncEQ(){for(let i=1;i<=4;i++){const s=stages[i-1],f=Number($('freq'+i).value),q=Number($('q'+i).value),g=Number($('gain'+i).value);s.eq.frequency.value=f;s.eq.Q.value=q;s.eq.gain.value=g;s.pass.frequency.value=f;s.pass.Q.value=q;s.stop.frequency.value=f;s.stop.Q.value=q}}
+function syncDenoise(){for(let i=1;i<=4;i++){if(!stages[i-1])continue;const a=Number($('denoise'+i).value)/100,s=stages[i-1];s.wet.gain.value=1-a;s.dry.gain.value=a;s.comp.threshold.value=-60+a*35;s.comp.ratio.value=1+a*39}}
+function syncTransient(){if(!transientNode)return;const a=transientNode.parameters.get('attack'),s=transientNode.parameters.get('sustain');if(a)a.setValueAtTime(Number($('attack').value),ctx.currentTime);if(s)s.setValueAtTime(Number($('sustain').value),ctx.currentTime)}
+function disconnectGraph(){try{gainNode?.disconnect();transientNode?.disconnect();stages.forEach(s=>{s.eq.disconnect();s.pass.disconnect();s.stop.disconnect();s.comp.disconnect();s.wet.disconnect();s.dry.disconnect();s.sum.disconnect()})}catch{}}
+function connectPlaybackChain(){if(!source||!gainNode||!stages.length||!transientNode)return;disconnectGraph();source.disconnect();if(bypass){source.connect(gainNode)}else{let node=source;for(const s of stages){node.connect(s.eq);node=s.sum}node.connect(transientNode);transientNode.connect(gainNode)}gainNode.connect(ctx.destination)}
+function saveCurrent(){const d={bands:[],attack:Number($('attack').value),sustain:Number($('sustain').value)};for(let i=1;i<=4;i++)d.bands.push({freq:Number($('freq'+i).value),gain:Number($('gain'+i).value),q:Number($('q'+i).value),denoise:Number($('denoise'+i).value)});if($('ab').textContent.endsWith('A'))slotA=d;else slotB=d}
+function loadSlot(){const d=$('ab').textContent.endsWith('A')?slotA:slotB;for(let i=1;i<=4;i++){const b=d.bands[i-1];$('freq'+i).value=b.freq;$('gain'+i).value=b.gain;$('q'+i).value=b.q;$('denoise'+i).value=b.denoise??0}$('attack').value=d.attack;$('sustain').value=d.sustain;updateOut();syncEQ();syncDenoise();syncTransient()}
+async function loadFile(file){try{if(!file)return;if(!file.type.startsWith('audio/')&&!/\.(wav|wave|aif|aiff|mp3|flac|m4a|ogg)$/i.test(file.name))throw new Error('請選擇音訊檔案。');if(!ctx)ctx=new AudioContext();const data=await file.arrayBuffer();buffer=await ctx.decodeAudioData(data.slice(0));$('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s｜可以按播放`}catch(e){buffer=null;$('status').textContent='音檔載入失敗：'+(e?.message||e);console.error(e)}}
+async function start(){if(!buffer){$('status').textContent='請先載入 WAV / AIFF。';return}try{if(!ctx)ctx=new AudioContext();ensureGraph();await ctx.resume();if(!transientNode)await createTransientNode();if(ctx.state!=='running')throw new Error('AudioContext 狀態：'+ctx.state);if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null}source=ctx.createBufferSource();source.buffer=buffer;source.onended=()=>{playing=false;source=null;if($('status').textContent.startsWith('播放中'))$('status').textContent='播放結束'};connectPlaybackChain();source.start(0);playing=true;$('status').textContent='播放中｜4 Band EQ + 每 Band De-noise + Transient'}catch(e){playing=false;$('status').textContent='播放失敗：'+(e?.message||e);console.error(e)}}
+function stop(){if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null}playing=false;$('status').textContent='已停止'}
+function setupDrop(){const drop=$('drop'),file=$('file'),choose=$('choose');choose.onclick=e=>{e.preventDefault();file.click()};file.onchange=e=>{const f=e.target.files?.[0];if(f)loadFile(f)};['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.add('drag');e.dataTransfer.dropEffect='copy'}));['dragleave','dragend'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('drag');const f=e.dataTransfer?.files?.[0];if(f)loadFile(f)});document.addEventListener('dragover',e=>e.preventDefault(),{passive:false});document.addEventListener('drop',e=>e.preventDefault(),{passive:false})}
+for(let i=1;i<=4;i++)['freq','gain','q','denoise'].forEach(p=>$(p+i).addEventListener('input',()=>{updateOut();saveCurrent();syncEQ();syncDenoise()}));['attack','sustain'].forEach(id=>$(id).addEventListener('input',()=>{updateOut();saveCurrent();syncTransient()}));$('play').onclick=start;$('stop').onclick=stop;$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;if(source)connectPlaybackChain()};$('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};updateOut();setupDrop();
