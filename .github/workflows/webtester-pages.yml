@@ -62,7 +62,7 @@ jobs:
               'this.bandNoise',
               'this.bandGain',
               'updateBandGate',
-              'Multiband-gate behavior'
+              'const target=Math.pow(10,-reductionDb/20)'
           ]
           forbidden_dn=['decision-directed Wiener','log-MMSE','noisePower','prevCleanPower','prevSpp']
           missing=[('HTML',x) for x in required_html if x not in html]
