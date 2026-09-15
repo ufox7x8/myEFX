@@ -31,7 +31,7 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Validate clean 4-band DSP contract
+      - name: Validate current DSP/UI contract
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -39,45 +39,26 @@ jobs:
           app=Path('WebTester/app.js').read_text(encoding='utf-8')
           dn=Path('WebTester/denoise-processor.js').read_text(encoding='utf-8')
           required_html=[
-              '4-BAND SPECTRAL DYNAMIC PROCESSOR',
-              'DEFAULT_FREQ=[31.5,125,1000,8000]',
-              'data-action="bypass"',
-              'data-action="delta"',
-              'class="knob"',
-              'for="file"',
-              'id="byp1"','id="byp2"','id="byp3"','id="byp4"',
-              'app.js?v=3',
-              '只顯示實際被改動的時間／頻率'
+              '4-BAND SPECTRAL DYNAMIC PROCESSOR','DEFAULT_FREQ=[31.5,125,1000,8000]',
+              'id="byp1"','id="byp2"','id="byp3"','id="byp4"','app.js?v=4',
+              'LOOP 範圍','knob-readout','system-ui','rangeIn','rangeOut'
           ]
           required_app=[
-              'processedBand - dryBand',
-              'drawProcessedDifference',
-              'myefx-denoise',
-              'denoise-processor.js?v=balanced4',
-              'transient-processor.js?v=clean4',
-              'deltaBand'
+              'denoise-processor.js?v=rxgate2','transient-processor.js?v=clean4',
+              'deltaBand','只有聽被處理改變的內容','e.code !== \'Space\'','setRangeFromCanvas','bindRange'
           ]
-          required_dn=[
-              'this.BANDS=64',
-              'this.bandNoise',
-              'this.bandGain',
-              'updateBandGate',
-              'const target=Math.pow(10,-reductionDb/20)'
-          ]
+          required_dn=['this.BANDS = 64','this.bandNoise','this.bandGain','maxReductionDb = 18 * amount','const target = Math.pow(10, -attenuationDb / 20)']
           forbidden_dn=['decision-directed Wiener','log-MMSE','noisePower','prevCleanPower','prevSpp']
           missing=[('HTML',x) for x in required_html if x not in html]
           missing += [('APP',x) for x in required_app if x not in app]
           missing += [('DENOISE',x) for x in required_dn if x not in dn]
           bad_dn=[x for x in forbidden_dn if x in dn]
-          if bad_dn:
-              raise SystemExit('Obsolete Wiener/log-MMSE denoise remains: '+', '.join(bad_dn))
-          if missing:
-              raise SystemExit('DSP contract failed: '+', '.join(f'{a}:{b}' for a,b in missing))
+          if bad_dn: raise SystemExit('Obsolete Wiener/log-MMSE denoise remains: '+', '.join(bad_dn))
+          if missing: raise SystemExit('DSP/UI contract failed: '+', '.join(f'{a}:{b}' for a,b in missing))
           forbidden=['legacy-file-loader.js','io-fix.js','file-io-hardfix.js','app-loader-repair.js','four-band-fix.js','knob-ui.js','perf-fix.js']
           bad=[x for x in forbidden if x in html or x in app]
-          if bad:
-              raise SystemExit('Obsolete patch layer still referenced: '+', '.join(bad))
-          print('4-band / RX-style multiband de-noise / DELTA / difference-only spectrogram validation OK')
+          if bad: raise SystemExit('Obsolete patch layer still referenced: '+', '.join(bad))
+          print('RX-style 64-band gate / DELTA solo-difference / keyboard / range-loop / UI contract OK')
           PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
