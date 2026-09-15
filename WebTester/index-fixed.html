@@ -19,9 +19,9 @@
 <section class="panel">
 <div class="head">SPECTROGRAM / INPUT <span>20 Hz — 20 kHz · full program</span></div>
 <div class="spec-wrap">
-<div class="spec-frame" id="inputFrame"><canvas class="spec" id="specIn"></canvas><div class="cursor" id="cursorIn"></div><div class="drop-ui" id="dropUi"><label class="drop-card" for="file"><b>拖曳音檔到這裡</b><div>或點一下選擇 WAV / AIFF / FLAC / MP3</div></label></div><input id="file" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.ogg" hidden></div>
+<div class="spec-frame" id="inputFrame"><canvas class="spec" id="specIn"></canvas><div class="cursor" id="cursorIn"></div><div class="drop-ui" id="dropUi"><label class="drop-card" for="file"><b>拖曳音檔到這裡</b><div>或點一下選擇 WAV / AIFF / FLAC / MP3</div></label><input id="file" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.ogg" hidden></div></div>
 <div class="meta"><span id="time">0.00 / 0.00 s</span><span id="fileInfo">未載入</span></div>
-<div class="head" style="margin-top:6px;border:0;border-top:1px solid #1b2c33;padding-left:0">SPECTROGRAM / PROCESSED <span>只有載入後才開始分析</span></div>
+<div class="head" style="margin-top:6px;border:0;border-top:1px solid #1b2c33;padding-left:0">SPECTROGRAM / PROCESSED <span>只顯示實際被改動的時間／頻率</span></div>
 <div class="spec-frame processed"><canvas class="spec" id="specOut"></canvas><div class="cursor" id="cursorOut"></div></div>
 <div class="transport"><button class="primary" id="play" type="button">▶ 播放</button><button id="stop" type="button">■ 停止</button><button id="loop" type="button">LOOP OFF</button><button id="bypassAll" type="button">BYPASS OFF</button><button id="ab" type="button">A/B · A</button><div class="status" id="status">尚未載入音檔。</div></div>
 </div></section>
@@ -30,7 +30,7 @@
 <article class="band b2" data-band="2"><div class="band-head"><span class="bnum">SECTION 2</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp2" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state2">ON</span></div></div></article>
 <article class="band b3" data-band="3"><div class="band-head"><span class="bnum">SECTION 3</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp3" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state3">ON</span></div></div></article>
 <article class="band b4" data-band="4"><div class="band-head"><span class="bnum">SECTION 4</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp4" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state4">ON</span></div></div></article>
-</div><div class="note">4 個 Section 固定存在。每 Band 獨立 BYPASS；DELTA 只聽該 Band 的差異。旋鈕支援上下拖曳、滾輪、雙擊 Reset、方向鍵微調。</div></section>
+</div><div class="note">DELTA = 該 Section「處理後 − 處理前」的真正差值。DE-NOISE 採逐頻點噪聲估計、先驗 SNR、Wiener／log-MMSE 混合增益、時間／頻率平滑與瞬態／諧波保護；不是單純把頻段音量壓低。Processed Spectrogram 未被處理的區域保持全黑。</div></section>
 </div>
 <script>
 const KNOBS=[['FREQ','freq',20,20000,1,'Hz'],['GAIN','gain',-24,24,.1,'dB'],['Q','q',.1,20,.01,''],['DE-NOISE','denoise',0,100,1,'%'],['PUNCH','punch',-100,100,1,'%'],['SUSTAIN','sustain',-100,100,1,'%']];
@@ -40,5 +40,5 @@ const grid=card.querySelector('.knob-grid');
 for(const [label,key,min,max,step,unit] of KNOBS){const initial=key==='freq'?DEFAULT_FREQ[idx]:(key==='q'?1:0);const id=key+(idx+1);const c=document.createElement('div');c.className='ctrl';c.innerHTML='<label>'+label+'</label><div class="knob" data-target="'+id+'" tabindex="0" role="slider"><div class="knob-pointer"></div><div class="knob-value" id="'+id+'Out"></div></div><input class="knob-input" id="'+id+'" type="range" min="'+min+'" max="'+max+'" step="'+step+'" value="'+initial+'" defaultValue="'+initial+'">';grid.appendChild(c)}
 }
 </script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body></html>
