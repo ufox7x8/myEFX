@@ -5,18 +5,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>myEFX Web Tester</title>
 <style>
-body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}main{max-width:1250px;margin:auto;padding:24px}.drop{border:2px dashed #555;border-radius:14px;padding:28px;text-align:center;margin-bottom:18px;transition:.15s}.drop.drag{border-color:#fff;background:#181818}.row{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px}.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:18px 14px}.param{text-align:center;min-width:0}.param-title{font-size:13px;color:#bbb;margin-bottom:8px}.knob{position:relative;width:72px;height:72px;margin:0 auto 7px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3c3c3c 0,#242424 42%,#141414 75%);border:1px solid #555;box-shadow:inset 0 2px 5px #000,0 2px 8px #000;cursor:ns-resize;touch-action:none;user-select:none}.knob:before{content:"";position:absolute;inset:6px;border-radius:50%;border:1px solid #444}.knob-pointer{position:absolute;left:50%;top:9px;width:3px;height:25px;border-radius:2px;background:#ddd;transform-origin:50% 27px;transform:translateX(-50%) rotate(-135deg);box-shadow:0 0 4px #fff}.knob-input{display:none}.param-value{font-size:12px;color:#ddd;font-variant-numeric:tabular-nums}.param-hint{font-size:10px;color:#777;margin-top:3px}.transport{display:flex;gap:8px;flex-wrap:wrap}.status{margin-top:10px;color:#aaa}.small{font-size:12px;color:#999}.section{margin-top:18px}.badge{font-size:12px;color:#aaa;margin-left:8px}.waveWrap{position:relative;background:#090909;border:1px solid #333;border-radius:10px;overflow:hidden;cursor:pointer}.waveWrap canvas{display:block;width:100%;height:180px}.cursor{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:0;pointer-events:none}.time{margin-top:6px;color:#aaa;font-variant-numeric:tabular-nums}.knob-note{margin-top:10px;padding:10px 12px;background:#151515;border-radius:8px;color:#999;font-size:12px;line-height:1.5}@media(max-width:800px){.row{grid-template-columns:1fr}.controls{grid-template-columns:repeat(2,1fr)}}@media(max-width:480px){.controls{grid-template-columns:repeat(2,1fr)}}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}
+main{max-width:1250px;margin:auto;padding:24px}
+.audioBox{position:relative;background:#090909;border:2px dashed #555;border-radius:14px;overflow:hidden;cursor:pointer;min-height:180px;margin-bottom:18px;transition:.15s}.audioBox.drag{border-color:#fff;background:#181818}.audioBox canvas{display:block;width:100%;height:180px}.audioPrompt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aaa;padding:20px;pointer-events:none}.audioBox.loaded .audioPrompt{display:none}.cursor{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:0;pointer-events:none}.time{margin-top:6px;color:#aaa;font-variant-numeric:tabular-nums}.row{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px}.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:18px 14px}.param{text-align:center;min-width:0}.param-title{font-size:13px;color:#bbb;margin-bottom:8px}.knob{position:relative;width:72px;height:72px;margin:0 auto 7px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3c3c3c 0,#242424 42%,#141414 75%);border:1px solid #555;box-shadow:inset 0 2px 5px #000,0 2px 8px #000;cursor:ns-resize;touch-action:none;user-select:none}.knob:before{content:"";position:absolute;inset:6px;border-radius:50%;border:1px solid #444}.knob-pointer{position:absolute;left:50%;top:9px;width:3px;height:25px;border-radius:2px;background:#ddd;transform-origin:50% 27px;transform:translateX(-50%) rotate(-135deg);box-shadow:0 0 4px #fff}.knob-input{display:none}.param-value{font-size:12px;color:#ddd;font-variant-numeric:tabular-nums}.param-hint{font-size:10px;color:#777;margin-top:3px}.transport{display:flex;gap:8px;flex-wrap:wrap}.transport button{padding:10px 14px;border:0;border-radius:8px;cursor:pointer}.status{margin-top:10px;color:#aaa}.small{font-size:12px;color:#999}.section{margin-top:18px}.knob-note{margin-top:10px;padding:10px 12px;background:#151515;border-radius:8px;color:#999;font-size:12px;line-height:1.5}@media(max-width:800px){.row{grid-template-columns:1fr}.controls{grid-template-columns:repeat(2,1fr)}}@media(max-width:480px){.controls{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
 <main>
 <h1>myEFX Web Tester</h1>
 <p class="small">4-band EQ + 每 Band De-noise + 每 Band Transient。Transient 與 De-noise 都只作用於該 Band 的 Frequency + Q 頻寬。</p>
-<div id="drop" class="drop">把 WAV / AIFF 拖到這裡，或 <button id="choose">選擇音檔</button><input id="file" type="file" accept="audio/*" hidden></div>
-<div class="transport"><button id="play">播放</button><button id="stop">停止</button><button id="bypass">Bypass：OFF</button><button id="ab">A/B：A</button></div>
+<div class="audioBox" id="audioBox">
+<canvas id="wave"></canvas>
+<div class="cursor" id="cursor"></div>
+<div class="audioPrompt" id="audioPrompt">把 WAV / AIFF 拖到這裡<br>或點一下選擇音檔</div>
+<input id="file" type="file" accept="audio/*" hidden>
+</div>
+<div class="time" id="time">0.00 / 0.00 s</div>
+<div class="transport"><button id="play" type="button">播放</button><button id="stop" type="button">停止</button><button id="bypass" type="button">Bypass：OFF</button><button id="ab" type="button">A/B：A</button></div>
 <div class="status" id="status">尚未載入音檔。</div>
-
-<div class="section"><h2>Waveform</h2><div class="waveWrap" id="waveWrap"><canvas id="wave"></canvas><div class="cursor" id="cursor"></div></div><div class="time" id="time">0.00 / 0.00 s</div></div>
 
 <div class="section"><h2>4-Band EQ + De-noise + Transient</h2><div class="row">
 <div class="card"><h3>Band 1</h3><div class="controls">
@@ -27,7 +33,6 @@ body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;backgrou
 <div class="param"><div class="param-title">Attack</div><div class="knob" data-target="attack1"><div class="knob-pointer"></div><input id="attack1" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="attack1Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 <div class="param"><div class="param-title">Sustain</div><div class="knob" data-target="sustain1"><div class="knob-pointer"></div><input id="sustain1" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="sustain1Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 </div></div>
-
 <div class="card"><h3>Band 2</h3><div class="controls">
 <div class="param"><div class="param-title">Freq</div><div class="knob" data-target="freq2"><div class="knob-pointer"></div><input id="freq2" class="knob-input" type="range" min="20" max="20000" value="500" step="1"><div class="param-value" id="freq2Out">500 Hz</div></div></div>
 <div class="param"><div class="param-title">Gain</div><div class="knob" data-target="gain2"><div class="knob-pointer"></div><input id="gain2" class="knob-input" type="range" min="-24" max="24" value="0" step="0.1"><div class="param-value" id="gain2Out">0.0 dB</div></div></div>
@@ -36,7 +41,6 @@ body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;backgrou
 <div class="param"><div class="param-title">Attack</div><div class="knob" data-target="attack2"><div class="knob-pointer"></div><input id="attack2" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="attack2Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 <div class="param"><div class="param-title">Sustain</div><div class="knob" data-target="sustain2"><div class="knob-pointer"></div><input id="sustain2" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="sustain2Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 </div></div>
-
 <div class="card"><h3>Band 3</h3><div class="controls">
 <div class="param"><div class="param-title">Freq</div><div class="knob" data-target="freq3"><div class="knob-pointer"></div><input id="freq3" class="knob-input" type="range" min="20" max="20000" value="2000" step="1"><div class="param-value" id="freq3Out">2000 Hz</div></div></div>
 <div class="param"><div class="param-title">Gain</div><div class="knob" data-target="gain3"><div class="knob-pointer"></div><input id="gain3" class="knob-input" type="range" min="-24" max="24" value="0" step="0.1"><div class="param-value" id="gain3Out">0.0 dB</div></div></div>
@@ -45,7 +49,6 @@ body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;backgrou
 <div class="param"><div class="param-title">Attack</div><div class="knob" data-target="attack3"><div class="knob-pointer"></div><input id="attack3" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="attack3Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 <div class="param"><div class="param-title">Sustain</div><div class="knob" data-target="sustain3"><div class="knob-pointer"></div><input id="sustain3" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="sustain3Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 </div></div>
-
 <div class="card"><h3>Band 4</h3><div class="controls">
 <div class="param"><div class="param-title">Freq</div><div class="knob" data-target="freq4"><div class="knob-pointer"></div><input id="freq4" class="knob-input" type="range" min="20" max="20000" value="8000" step="1"><div class="param-value" id="freq4Out">8000 Hz</div></div></div>
 <div class="param"><div class="param-title">Gain</div><div class="knob" data-target="gain4"><div class="knob-pointer"></div><input id="gain4" class="knob-input" type="range" min="-24" max="24" value="0" step="0.1"><div class="param-value" id="gain4Out">0.0 dB</div></div></div>
@@ -55,7 +58,6 @@ body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;backgrou
 <div class="param"><div class="param-title">Sustain</div><div class="knob" data-target="sustain4"><div class="knob-pointer"></div><input id="sustain4" class="knob-input" type="range" min="-100" max="100" value="0" step="1"><div class="param-value" id="sustain4Out">0%</div><div class="param-hint">0 = 12 點鐘</div></div></div>
 </div></div>
 </div></div>
-
 <div class="knob-note">旋鈕操作：滑鼠按住上下拖曳調整；雙擊回到預設值。Gain / Attack / Sustain 的 0 在 12 點鐘；De-noise 的 0% 在 7 點鐘。</div>
 </main>
 <script src="app.js"></script>
