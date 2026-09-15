@@ -26,6 +26,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate JavaScript syntax
+        run: |
+          node --check WebTester/app.js
+          node --check WebTester/denoise-processor.js
+          node --check WebTester/transient-processor.js
+      - name: Validate 8-band UI
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('WebTester/index.html').read_text(encoding='utf-8')
+          for i in range(1,9):
+              assert f'id="freq{i}"' in s
+              assert f'id="byp{i}"' in s
+              assert f'id="delta{i}"' in s
+          assert 'perf-fix.js' not in s
+          print('8-band UI validation OK')
+          PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
