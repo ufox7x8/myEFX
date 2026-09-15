@@ -1,0 +1,10 @@
+Builds/
+.vs/
+*.user
+*.suo
+*.vcxproj.user
+*.ninja*
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+*.log
