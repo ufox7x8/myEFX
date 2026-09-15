@@ -13,33 +13,88 @@ function updateOut(){
 function connectGraph(){
  if(!ctx||!filter||!gainNode)return;
  try{filter.disconnect();gainNode.disconnect()}catch{}
- if(bypass)gainNode.connect(ctx.destination);else filter.connect(gainNode);
+ if(bypass){
+   filter.disconnect();
+   gainNode.connect(ctx.destination);
+ }else{
+   filter.connect(gainNode);
+   gainNode.connect(ctx.destination);
+ }
 }
-function syncToNode(){if(!filter)return;filter.frequency.value=Number($('freq').value);filter.gain.value=Number($('gain').value);filter.Q.value=Number($('q').value);connectGraph();}
-function saveCurrent(){const o={freq:Number($('freq').value),gain:Number($('gain').value),q:Number($('q').value)};if($('ab').textContent.endsWith('A'))slotA=o;else slotB=o;}
-function loadSlot(){const o=$('ab').textContent.endsWith('A')?slotA:slotB;$('freq').value=o.freq;$('gain').value=o.gain;$('q').value=o.q;updateOut();syncToNode();}
+function syncToNode(){
+ if(!filter)return;
+ filter.frequency.value=Number($('freq').value);
+ filter.gain.value=Number($('gain').value);
+ filter.Q.value=Number($('q').value);
+ connectGraph();
+}
+function saveCurrent(){
+ const o={freq:Number($('freq').value),gain:Number($('gain').value),q:Number($('q').value)};
+ if($('ab').textContent.endsWith('A'))slotA=o;else slotB=o;
+}
+function loadSlot(){
+ const o=$('ab').textContent.endsWith('A')?slotA:slotB;
+ $('freq').value=o.freq;$('gain').value=o.gain;$('q').value=o.q;
+ updateOut();syncToNode();
+}
 function ensureGraph(){
  if(!ctx)ctx=new AudioContext();
  if(!gainNode){gainNode=ctx.createGain();gainNode.gain.value=1;}
- if(!filter){filter=ctx.createBiquadFilter();filter.type='peaking';filter.frequency.value=1000;filter.gain.value=0;filter.Q.value=1;}
- connectGraph();
+ if(!filter){
+   filter=ctx.createBiquadFilter();
+   filter.type='peaking';
+   filter.frequency.value=1000;
+   filter.gain.value=0;
+   filter.Q.value=1;
+ }
+ syncToNode();
 }
 async function loadFile(file){
- try{ctx=ctx||new AudioContext();const ab=await file.arrayBuffer();buffer=await ctx.decodeAudioData(ab);$('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s`;}
- catch(e){$('status').textContent='音檔載入失敗：'+e.message;}
+ try{
+   if(!ctx)ctx=new AudioContext();
+   if(!file.type.startsWith('audio/') && !/\.(wav|wave|aif|aiff|mp3|flac|m4a|ogg)$/i.test(file.name)){
+     throw new Error('請選擇音訊檔案。');
+   }
+   const ab=await file.arrayBuffer();
+   buffer=await ctx.decodeAudioData(ab.slice(0));
+   $('status').textContent=`已載入：${file.name}｜${buffer.numberOfChannels} ch｜${buffer.sampleRate} Hz｜${buffer.duration.toFixed(2)} s｜可以按播放`;
+ }catch(e){
+   buffer=null;
+   $('status').textContent='音檔載入失敗：'+(e?.message||e);
+ }
 }
-function start(){
+async function start(){
  if(!buffer){$('status').textContent='請先載入 WAV / AIFF。';return;}
- ensureGraph(); if(ctx.state==='suspended')ctx.resume(); if(source)try{source.stop()}catch{}
- source=ctx.createBufferSource();source.buffer=buffer;source.connect(filter);source.onended=()=>{playing=false};source.start();playing=true;$('status').textContent='播放中';
+ try{
+   if(!ctx)ctx=new AudioContext();
+   ensureGraph();
+   await ctx.resume();
+   if(ctx.state!=='running')throw new Error(`AudioContext 狀態：${ctx.state}`);
+   if(source){try{source.stop()}catch{}source.disconnect();source=null;}
+   source=ctx.createBufferSource();
+   source.buffer=buffer;
+   source.connect(filter);
+   source.onended=()=>{playing=false;source=null;if($('status').textContent==='播放中')$('status').textContent='播放結束';};
+   source.start(0);
+   playing=true;
+   $('status').textContent=`播放中｜AudioContext：${ctx.state}`;
+ }catch(e){
+   playing=false;
+   $('status').textContent='播放失敗：'+(e?.message||e);
+   console.error(e);
+ }
 }
-function stop(){if(source)try{source.stop()}catch{}playing=false;$('status').textContent='已停止';}
+function stop(){
+ if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null;}
+ playing=false;$('status').textContent='已停止';
+}
 $('file').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0])});
-$('drop').addEventListener('dragover',e=>{e.preventDefault();$('drop').style.borderColor='#999'});
+$('drop').addEventListener('dragover',e=>{e.preventDefault();$('drop').style.borderColor='#999';e.dataTransfer.dropEffect='copy'});
 $('drop').addEventListener('dragleave',()=>$('drop').style.borderColor='#555');
 $('drop').addEventListener('drop',e=>{e.preventDefault();$('drop').style.borderColor='#555';const f=e.dataTransfer.files[0];if(f)loadFile(f)});
 ['freq','gain','q','dyn','trans','denoise'].forEach(id=>$(id).addEventListener('input',()=>{updateOut();saveCurrent();syncToNode()}));
-$('play').onclick=start;$('stop').onclick=stop;
+$('play').onclick=start;
+$('stop').onclick=stop;
 $('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;connectGraph()};
 $('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};
 updateOut();
