@@ -1,47 +1,857 @@
-/* myEFX Web Tester — clean native 4-band rebuild */
-(()=>{
-'use strict';
-const BAND_COUNT=4;
-const DEFAULTS=[{freq:31.5,gain:0,q:1,denoise:0,punch:0,sustain:0,bypass:false},{freq:125,gain:0,q:1,denoise:0,punch:0,sustain:0,bypass:false},{freq:1000,gain:0,q:1,denoise:0,punch:0,sustain:0,bypass:false},{freq:8000,gain:0,q:1,denoise:0,punch:0,sustain:0,bypass:false}];
-const INFO={freq:{min:20,max:20000,step:1},gain:{min:-24,max:24,step:.1},q:{min:.1,max:20,step:.01},denoise:{min:0,max:100,step:1},punch:{min:-100,max:100,step:1},sustain:{min:-100,max:100,step:1}};
-let ctx=null,buffer=null,source=null,graph=null,playing=false,loop=false,bypassAll=false,offset=0,startAt=0,raf=0,delta=0,token=0,renderToken=0,renderTimer=0,slot='A',slotA=clone(),slotB=clone(),workletsReady=false;
-const $=id=>document.getElementById(id),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function clone(){return DEFAULTS.map(x=>({...x}));}
-function status(t){$('status').textContent=t;}
-function data(){return Array.from({length:BAND_COUNT},(_,n)=>{let i=n+1;return{freq:+$('freq'+i).value,gain:+$('gain'+i).value,q:+$('q'+i).value,denoise:+$('denoise'+i).value,punch:+$('punch'+i).value,sustain:+$('sustain'+i).value,bypass:!$('byp'+i).classList.contains('on')}});}
-function save(){if(slot==='A')slotA=data();else slotB=data();}
-function fmt(k,v){if(k==='freq')return v>=1000?(v/1000).toFixed(v>=10000?1:2)+' kHz':(v%1?v.toFixed(1):Math.round(v))+' Hz';if(k==='gain')return v.toFixed(1)+' dB';if(k==='q')return v.toFixed(2);return Math.round(v)+'%';}
-function renderKnob(input){let k=input.id.replace(/[0-9]+$/,'');let d=INFO[k],v=+input.value,n=-135+270*(v-d.min)/(d.max-d.min),knob=document.querySelector('.knob[data-target="'+input.id+'"]');if(!knob)return;knob.querySelector('.knob-pointer').style.transform='translateX(-50%) rotate('+n+'deg)';$(input.id+'Out').textContent=fmt(k,v);}
-function setInput(input,v){let k=input.id.replace(/[0-9]+$/,'');let d=INFO[k];v=clamp(Math.round(v/d.step)*d.step,d.min,d.max);let dec=(String(d.step).split('.')[1]||'').length;input.value=Number(v.toFixed(dec));input.dispatchEvent(new Event('input',{bubbles:true}));}
-function setBypass(i,on,update=true){let b=$('byp'+i);b.classList.toggle('on',on);b.classList.toggle('off',!on);$('state'+i).textContent=on?'ON':'BYP';if(update){syncGraph();scheduleRender();}}
-function apply(d){for(let i=1;i<=BAND_COUNT;i++){let b=d[i-1]||DEFAULTS[i-1];for(let k of Object.keys(INFO))$(''+k+i).value=clamp(+b[k],INFO[k].min,INFO[k].max);setBypass(i,!!b.bypass,false);renderKnob($('freq'+i));renderKnob($('gain'+i));renderKnob($('q'+i));renderKnob($('denoise'+i));renderKnob($('punch'+i));renderKnob($('sustain'+i));}syncGraph();}
-function resetAll(){apply(clone());save();drawResponse();scheduleRender();status('所有 Sections 已重設。');}
-function resetBand(i){let d=data();d[i-1]={...DEFAULTS[i-1]};apply(d);save();drawResponse();scheduleRender();status('SECTION '+i+' 已重設。');}
-function ensureCtx(){if(!ctx||ctx.state==='closed')ctx=new AudioContext();return ctx;}
-async function ensureWorklets(){if(workletsReady)return;let c=ensureCtx();await c.audioWorklet.addModule('denoise-processor.js?v=clean1');await c.audioWorklet.addModule('transient-processor.js?v=clean1');workletsReady=true;}
-function stage(c){let eq=c.createBiquadFilter();eq.type='peaking';let split=c.createBiquadFilter();split.type='bandpass';let inv=c.createGain();inv.gain.value=-1;let out=c.createGain();let dry=c.createGain(),wet=c.createGain(),dSum=c.createGain(),tDry=c.createGain(),tWet=c.createGain(),tSum=c.createGain();eq.connect(out);split.connect(inv);inv.connect(out);split.connect(dry);split.connect(wet);dry.connect(dSum);wet.connect(dSum);dSum.connect(tDry);dSum.connect(tWet);tDry.connect(tSum);tWet.connect(tSum);tSum.connect(out);return{eq,split,inv,out,dry,wet,dSum,tDry,tWet,tSum,denoise:null,transient:null};}
-async function ensureGraph(){let c=ensureCtx();if(!graph){let stages=Array.from({length:BAND_COUNT},()=>stage(c)),master=c.createGain(),analyser=c.createAnalyser();analyser.fftSize=2048;master.connect(analyser);analyser.connect(c.destination);graph={stages,master,analyser};}await ensureWorklets();for(let s of graph.stages){if(!s.denoise){s.denoise=new AudioWorkletNode(c,'myefx-denoise',{parameterData:{amount:0,threshold:1.5,reduction:30,adaptation:1,smoothing:38,transientProtect:72,tonalProtect:12,learn:0}});s.wet.disconnect();s.wet.connect(s.denoise);s.denoise.connect(s.dSum);}if(!s.transient){s.transient=new AudioWorkletNode(c,'myefx-transient',{parameterData:{punch:0,sustain:0}});s.tWet.disconnect();s.tWet.connect(s.transient);s.transient.connect(s.tSum);}}syncGraph();}
-function syncGraph(){if(!graph||!ctx)return;let now=ctx.currentTime;data().forEach((b,i)=>{let s=graph.stages[i];s.eq.frequency.setTargetAtTime(b.freq,now,.004);s.eq.Q.setTargetAtTime(b.q,now,.004);s.eq.gain.setTargetAtTime(b.bypass?0:b.gain,now,.004);s.split.frequency.setTargetAtTime(b.freq,now,.004);s.split.Q.setTargetAtTime(b.q,now,.004);let dn=b.bypass?0:b.denoise;s.dry.gain.setTargetAtTime(b.bypass||b.denoise===0?1:0,now,.004);s.wet.gain.setTargetAtTime(b.bypass||b.denoise===0?0:1,now,.004);s.denoise?.parameters.get('amount')?.setTargetAtTime(dn,now,.004);let mix=b.bypass?0:Math.min(1,(Math.abs(b.punch)+Math.abs(b.sustain))/200);s.tDry.gain.setTargetAtTime(1-mix,now,.004);s.tWet.gain.setTargetAtTime(mix,now,.004);s.transient?.parameters.get('punch')?.setTargetAtTime(b.bypass?0:b.punch,now,.004);s.transient?.parameters.get('sustain')?.setTargetAtTime(b.bypass?0:b.sustain,now,.004);});}
-function disconnect(){if(source){try{source.stop()}catch{}try{source.disconnect()}catch{}source=null;}}
-function connectPlayback(){disconnect();source=ctx.createBufferSource();source.buffer=buffer;source.loop=loop;if(bypassAll){source.connect(ctx.destination);return;}if(delta){source.connect(graph.stages[delta-1].split);graph.stages[delta-1].tSum.connect(graph.master);return;}let n=source;for(let s of graph.stages){n.connect(s.eq);n.connect(s.split);n=s.out;}n.connect(graph.master);}
-async function play(){if(!buffer){status('請先載入音檔。');return;}try{let c=ensureCtx();await c.resume();await ensureGraph();syncGraph();connectPlayback();startAt=c.currentTime;source.start(0,clamp(offset,0,Math.max(0,buffer.duration-.001)));playing=true;$('play').textContent='❚❚ 播放中';status(delta?'DELTA B'+delta+' 播放中':bypassAll?'BYPASS 播放中':'播放中');cursor();}catch(e){playing=false;status('播放失敗：'+(e.message||e));console.error(e);}}
-function stop(){if(playing&&ctx&&buffer){let t=Math.max(0,ctx.currentTime-startAt);offset=loop?(offset+t)%buffer.duration:Math.min(buffer.duration,offset+t);}playing=false;disconnect();cancelAnimationFrame(raf);$('play').textContent='▶ 播放';setCursor(buffer?offset/buffer.duration:0);status('已停止');}
-function cursor(){if(!playing||!buffer||!ctx)return;let p=(offset+(ctx.currentTime-startAt))/buffer.duration;if(loop)p=((offset+(ctx.currentTime-startAt))%buffer.duration)/buffer.duration;if(!loop&&p>=1){p=1;playing=false;disconnect();$('play').textContent='▶ 播放';status('播放結束');}setCursor(p);if(playing)raf=requestAnimationFrame(cursor);}
-function setCursor(p){p=clamp(p,0,1);$('cursorIn').style.left=p*100+'%';$('cursorOut').style.left=p*100+'%';$('time').textContent=buffer?((p*buffer.duration).toFixed(2)+' / '+buffer.duration.toFixed(2)+' s'):'0.00 / 0.00 s';}
-function fft(r,im){let n=r.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){let t=r[i];r[i]=r[j];r[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}for(let l=2;l<=n;l<<=1){let a=-2*Math.PI/l,w0=Math.cos(a),wi0=Math.sin(a);for(let i=0;i<n;i+=l){let wr=1,wi=0,h=l>>1;for(let j=0;j<h;j++){let u=r[i+j],ui=im[i+j],v=r[i+j+h]*wr-im[i+j+h]*wi,vi=r[i+j+h]*wi+im[i+j+h]*wr;r[i+j]=u+v;im[i+j]=ui+vi;r[i+j+h]=u-v;im[i+j+h]=ui-vi;let tr=wr*w0-wi*wi0;wi=wr*wi0+wi*w0;wr=tr;}}}}
-function color(db){let v=clamp((db+90)/90,0,1),r=Math.floor(255*clamp((v-.62)*3,0,1)),g=Math.floor(255*clamp((v-.28)*2,0,1)),b=Math.floor(255*clamp((v-.02)*2.7,0,1));return`rgb(${r},${g},${b})`;}
-function drawSpectrogram(audio,canvas,processed){let id=++renderToken,w=canvas.clientWidth||900,h=canvas.clientHeight||220,n=512,half=256,L=audio.getChannelData(0),R=audio.numberOfChannels>1?audio.getChannelData(1):L,PL=processed&&processed.getChannelData(0),PR=processed&&processed.numberOfChannels>1?processed.getChannelData(1):PL,re=new Float32Array(n),im=new Float32Array(n),pr=processed?new Float32Array(n):null,pi=processed?new Float32Array(n):null,win=new Float32Array(n);canvas.width=w;canvas.height=h;let g=canvas.getContext('2d',{alpha:false});g.fillStyle='#02070a';g.fillRect(0,0,w,h);for(let i=0;i<n;i++)win[i]=.5-.5*Math.cos(2*Math.PI*i/(n-1));let x=0;function paint(){if(id!==renderToken)return;for(let z=0;z<14&&x<w;z++,x++){let center=Math.floor(x/Math.max(1,w-1)*(L.length-1)),start=center-half;for(let i=0;i<n;i++){let j=clamp(start+i,0,L.length-1);re[i]=((L[j]+R[j])*.5)*win[i];im[i]=0;if(processed){let k=clamp(start+i,0,PL.length-1);pr[i]=((PL[k]+PR[k])*.5)*win[i];pi[i]=0;}}fft(re,im);if(processed)fft(pr,pi);for(let y=0;y<h;y++){let f=20*Math.pow(1000,1-y/Math.max(1,h-1)),bin=clamp(Math.round(f*n/audio.sampleRate),1,half),a=20*Math.log10(Math.hypot(re[bin],im[bin])/n+1e-8);if(!processed)g.fillStyle=color(a);else{let b=20*Math.log10(Math.hypot(pr[bin],pi[bin])/n+1e-8),d=b-a,s=clamp(Math.abs(d)/6,0,1);if(s<.03)continue;g.fillStyle=d<0?`rgba(45,174,230,${.2+.8*s})`:`rgba(255,150,54,${.2+.8*s})`;}g.fillRect(x,y,1,1);}}}if(x<w)requestAnimationFrame(paint)}paint();}
-function response(freq){let total=0;for(let b of data()){if(b.bypass)continue;let s=Math.exp(-.5*Math.pow(Math.log2(Math.max(20,freq)/b.freq)*b.q*2,2));total+=b.gain*s;}return total;}
-function drawResponse(){if(!buffer)return;let c=$('specIn'),g=c.getContext('2d'),w=c.width,h=c.height,top=76,y0=top*.66;g.fillStyle='rgba(2,7,10,.84)';g.fillRect(0,0,w,top);g.strokeStyle='rgba(120,160,170,.24)';g.lineWidth=1;for(let f of [20,50,100,200,500,1000,2000,5000,10000,20000]){let x=Math.log10(f/20)/3*w;g.beginPath();g.moveTo(x,0);g.lineTo(x,top);g.stroke();g.fillStyle='#73888f';g.font='8px sans-serif';g.fillText(f>=1000?f/1000+'k':f,x+2,top-4);}g.strokeStyle='#f4ffff';g.lineWidth=2;g.beginPath();for(let x=0;x<w;x++){let f=20*Math.pow(1000,x/Math.max(1,w-1)*3),y=y0-clamp(response(f),-18,18)*1.1;x?g.lineTo(x,y):g.moveTo(x,y);}g.stroke();}
-function clearOut(){let c=$('specOut'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);}
-async function offline(input,d){let o=new OfflineAudioContext(2,input.length,input.sampleRate);await o.audioWorklet.addModule('denoise-processor.js?v=clean1');await o.audioWorklet.addModule('transient-processor.js?v=clean1');let ends=d.map(b=>{let eq=o.createBiquadFilter();eq.type='peaking';eq.frequency.value=b.freq;eq.Q.value=b.q;eq.gain.value=b.bypass?0:b.gain;let split=o.createBiquadFilter();split.type='bandpass';split.frequency.value=b.freq;split.Q.value=b.q;let inv=o.createGain();inv.gain.value=-1;let out=o.createGain();eq.connect(out);split.connect(inv);inv.connect(out);let dry=o.createGain(),wet=o.createGain(),sum=o.createGain();let dn=new AudioWorkletNode(o,'myefx-denoise',{parameterData:{amount:b.bypass?0:b.denoise,threshold:1.5,reduction:30,adaptation:1,smoothing:38,transientProtect:72,tonalProtect:12,learn:0}});dry.gain.value=b.bypass||!b.denoise?1:0;wet.gain.value=b.bypass||!b.denoise?0:1;split.connect(dry);split.connect(wet);dry.connect(sum);wet.connect(dn);dn.connect(sum);let td=o.createGain(),tw=o.createGain(),ts=o.createGain(),tr=new AudioWorkletNode(o,'myefx-transient',{parameterData:{punch:b.bypass?0:b.punch,sustain:b.bypass?0:b.sustain}}),mix=b.bypass?0:Math.min(1,(Math.abs(b.punch)+Math.abs(b.sustain))/200);td.gain.value=1-mix;tw.gain.value=mix;sum.connect(td);sum.connect(tw);td.connect(ts);tw.connect(tr);tr.connect(ts);ts.connect(out);return out});let s=o.createBufferSource();s.buffer=input;let node=s;for(let e of ends){node.connect(e);node=e;}node.connect(o.destination);s.start();return o.startRendering();}
-async function renderProcessed(){if(!buffer||playing)return;let id=++renderToken;status('分析 Processed Spectrogram…');try{let out=await offline(buffer,data());if(id!==renderToken||playing)return;drawSpectrogram(buffer,$('specOut'),out);status('Processed Spectrogram 已更新。');}catch(e){clearOut();status('Processed Spectrogram 分析失敗：'+(e.message||e));console.warn(e);}}
-function scheduleRender(){clearTimeout(renderTimer);if(!buffer||playing)return;renderTimer=setTimeout(renderProcessed,700);}
-async function loadFile(file){if(!file)return;if(!file.type.startsWith('audio/')&&!/\.(wav|wave|aif|aiff|flac|mp3|m4a|ogg)$/i.test(file.name)){status('請選擇音訊檔。');return;}let id=++token;stop();buffer=null;offset=0;clearOut();$('fileInfo').textContent='讀取中…';status('1/3 讀取音檔…');try{let c=ensureCtx(),bytes=await file.arrayBuffer();if(id!==token)return;status('2/3 解碼 WAV / AIFF / FLAC / MP3…');let decoded=await c.decodeAudioData(bytes);if(id!==token)return;if(!decoded||!decoded.length)throw new Error('AudioBuffer 為空');buffer=decoded;$('dropUi').style.display='none';$('fileInfo').textContent=`${file.name} · ${buffer.numberOfChannels}ch · ${buffer.sampleRate}Hz · ${buffer.duration.toFixed(2)}s`;setCursor(0);requestAnimationFrame(()=>{if(id!==token||!buffer)return;drawSpectrogram(buffer,$('specIn'));drawResponse();status('3/3 音檔已載入；播放時才啟用 DSP。');scheduleRender();});}catch(e){if(id!==token)return;buffer=null;$('dropUi').style.display='flex';$('fileInfo').textContent='未載入';status('音檔載入失敗：'+(e.name==='NotSupportedError'?'瀏覽器不支援此格式':e.message||e));console.error(e);}}
-function bindFile(){let frame=$('inputFrame'),file=$('file');file.addEventListener('change',e=>{let f=e.target.files?.[0];e.target.value='';if(f)loadFile(f);});frame.addEventListener('click',e=>{if(e.target.closest('.drop-card'))return;if(!buffer)file.click();else{let r=(e.clientX-frame.getBoundingClientRect().left)/frame.clientWidth;stop();offset=clamp(r,0,1)*buffer.duration;setCursor(r);}});frame.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});frame.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();let f=e.dataTransfer?.files?.[0];if(f)loadFile(f);});window.addEventListener('dragover',e=>{if(e.dataTransfer?.files?.length)e.preventDefault();});window.addEventListener('drop',e=>{if(e.dataTransfer?.files?.length)e.preventDefault();});}
-function bindKnobs(){document.querySelectorAll('.knob[data-target]').forEach(knob=>{let input=$(knob.dataset.target),active=false,y0=0,v0=0;renderKnob(input);knob.addEventListener('pointerdown',e=>{active=true;y0=e.clientY;v0=+input.value;knob.setPointerCapture?.(e.pointerId);e.preventDefault()});knob.addEventListener('pointermove',e=>{if(!active)return;let k=input.id.replace(/[0-9]+$/,''),r=INFO[k].max-INFO[k].min;setInput(input,v0+(y0-e.clientY)*r/190)});let end=e=>{active=false;try{knob.releasePointerCapture?.(e.pointerId)}catch{}};knob.addEventListener('pointerup',end);knob.addEventListener('pointercancel',end);knob.addEventListener('wheel',e=>{e.preventDefault();let k=input.id.replace(/[0-9]+$/,'');setInput(input,+input.value+(e.deltaY<0?INFO[k].step:-INFO[k].step))},{passive:false});knob.addEventListener('dblclick',e=>{e.preventDefault();setInput(input,+input.defaultValue)});knob.addEventListener('keydown',e=>{let k=input.id.replace(/[0-9]+$/,''),v=+input.value;if(e.key==='ArrowUp'||e.key==='ArrowRight')v+=INFO[k].step;else if(e.key==='ArrowDown'||e.key==='ArrowLeft')v-=INFO[k].step;else if(e.key==='Home')v=INFO[k].min;else if(e.key==='End')v=INFO[k].max;else if(e.key==='Enter')v=+input.defaultValue;else return;e.preventDefault();setInput(input,v)});input.addEventListener('input',()=>{renderKnob(input);save();syncGraph();drawResponse();scheduleRender();});});}
-function bindButtons(){document.addEventListener('click',e=>{let b=e.target.closest('[data-action]');if(!b)return;let i=+b.closest('.band').dataset.band;if(b.dataset.action==='bypass')setBypass(i,!b.classList.contains('on'));if(b.dataset.action==='delta'){delta=delta===i?0:i;document.querySelectorAll('[data-action="delta"]').forEach(x=>x.classList.toggle('active',+x.closest('.band').dataset.band===delta));if(playing){let p=offset;stop();offset=p;play();}status(delta?'DELTA B'+delta+'：只聽該頻段':'DELTA OFF');}if(b.dataset.action==='reset')resetBand(i)});$('play').onclick=()=>playing?stop():play();$('stop').onclick=stop;$('loop').onclick=()=>{loop=!loop;$('loop').textContent='LOOP '+(loop?'ON':'OFF');$('loop').classList.toggle('active',loop)};$('bypassAll').onclick=()=>{bypassAll=!bypassAll;$('bypassAll').textContent='BYPASS '+(bypassAll?'ON':'OFF');$('bypassAll').classList.toggle('active',bypassAll);if(playing){let p=offset;stop();offset=p;play()}};$('ab').onclick=()=>{save();slot=slot==='A'?'B':'A';$('ab').textContent='A/B · '+slot;apply(slot==='A'?slotA:slotB);status('已切換至 '+slot+'。')};$('resetAll').onclick=resetAll;$('resetBands').onclick=resetAll;$('sortBtn').onclick=()=>{let d=data().sort((a,b)=>a.freq-b.freq);apply(d);save();drawResponse();scheduleRender();status('Sections 已由低頻到高頻排序。')};}
-function init(){bindFile();bindKnobs();bindButtons();$('specIn').width=900;$('specIn').height=260;$('specOut').width=900;$('specOut').height=205;apply(clone());status('尚未載入音檔。');}
-window.myEFX={loadFile,play,stop,currentData:data};
-init();
+(() => {
+  'use strict';
+
+  const BAND_COUNT = 4;
+  const DEFAULTS = [
+    { freq: 31.5, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 125, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 1000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 8000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false }
+  ];
+  const INFO = {
+    freq: { min: 20, max: 20000, step: 1 },
+    gain: { min: -24, max: 24, step: 0.1 },
+    q: { min: 0.1, max: 20, step: 0.01 },
+    denoise: { min: 0, max: 100, step: 1 },
+    punch: { min: -100, max: 100, step: 1 },
+    sustain: { min: -100, max: 100, step: 1 }
+  };
+
+  let ctx = null;
+  let buffer = null;
+  let source = null;
+  let graph = null;
+  let playing = false;
+  let loop = false;
+  let bypassAll = false;
+  let offset = 0;
+  let startAt = 0;
+  let raf = 0;
+  let deltaBand = 0;
+  let loadToken = 0;
+  let renderToken = 0;
+  let renderTimer = 0;
+  let slot = 'A';
+  let slotA = cloneDefaults();
+  let slotB = cloneDefaults();
+
+  const $ = id => document.getElementById(id);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function cloneDefaults() {
+    return DEFAULTS.map(b => ({ ...b }));
+  }
+
+  function setStatus(text) {
+    const el = $('status');
+    if (el) el.textContent = text;
+  }
+
+  function currentData() {
+    return Array.from({ length: BAND_COUNT }, (_, n) => {
+      const i = n + 1;
+      return {
+        freq: Number($('freq' + i).value),
+        gain: Number($('gain' + i).value),
+        q: Number($('q' + i).value),
+        denoise: Number($('denoise' + i).value),
+        punch: Number($('punch' + i).value),
+        sustain: Number($('sustain' + i).value),
+        bypass: !$('byp' + i).classList.contains('on')
+      };
+    });
+  }
+
+  function saveSlot() {
+    if (slot === 'A') slotA = currentData();
+    else slotB = currentData();
+  }
+
+  function formatValue(key, value) {
+    if (key === 'freq') {
+      return value >= 1000
+        ? (value / 1000).toFixed(value >= 10000 ? 1 : 2) + ' kHz'
+        : (value % 1 ? value.toFixed(1) : Math.round(value)) + ' Hz';
+    }
+    if (key === 'gain') return value.toFixed(1) + ' dB';
+    if (key === 'q') return value.toFixed(2);
+    return Math.round(value) + '%';
+  }
+
+  function renderKnob(input) {
+    if (!input) return;
+    const key = input.id.replace(/[0-9]+$/, '');
+    const d = INFO[key];
+    const value = Number(input.value);
+    const angle = -135 + 270 * ((value - d.min) / (d.max - d.min));
+    const knob = document.querySelector(`.knob[data-target="${input.id}"]`);
+    if (!knob) return;
+    knob.querySelector('.knob-pointer').style.transform = `translateX(-50%) rotate(${angle}deg)`;
+    const out = $(input.id + 'Out');
+    if (out) out.textContent = formatValue(key, value);
+  }
+
+  function setInput(input, value, trigger = true) {
+    const key = input.id.replace(/[0-9]+$/, '');
+    const d = INFO[key];
+    let v = clamp(value, d.min, d.max);
+    const decimals = (String(d.step).split('.')[1] || '').length;
+    v = Number((Math.round(v / d.step) * d.step).toFixed(decimals));
+    input.value = String(v);
+    renderKnob(input);
+    if (trigger) input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function setBandBypass(i, on, update = true) {
+    const btn = $('byp' + i);
+    btn.classList.toggle('on', on);
+    btn.classList.toggle('off', !on);
+    const state = document.querySelector(`.band[data-band="${i}"] .state`);
+    if (state) state.textContent = on ? 'ON' : 'BYP';
+    if (update) {
+      syncGraph();
+      saveSlot();
+      scheduleProcessedRender();
+      drawResponse();
+    }
+  }
+
+  function applyData(data) {
+    for (let i = 1; i <= BAND_COUNT; i++) {
+      const b = data[i - 1] || DEFAULTS[i - 1];
+      for (const key of Object.keys(INFO)) {
+        const input = $(key + i);
+        input.value = String(clamp(Number(b[key]), INFO[key].min, INFO[key].max));
+        renderKnob(input);
+      }
+      setBandBypass(i, !b.bypass, false);
+    }
+    syncGraph();
+    drawResponse();
+  }
+
+  function resetAll() {
+    applyData(cloneDefaults());
+    saveSlot();
+    scheduleProcessedRender();
+    setStatus('所有 Sections 已重設。');
+  }
+
+  function resetBand(i) {
+    const data = currentData();
+    data[i - 1] = { ...DEFAULTS[i - 1] };
+    applyData(data);
+    saveSlot();
+    scheduleProcessedRender();
+    setStatus(`SECTION ${i} 已重設。`);
+  }
+
+  function sortBands() {
+    const data = currentData().sort((a, b) => a.freq - b.freq);
+    applyData(data);
+    saveSlot();
+    scheduleProcessedRender();
+    setStatus('Sections 已依頻率由低到高排序。');
+  }
+
+  function ensureContext() {
+    if (!ctx || ctx.state === 'closed') ctx = new AudioContext();
+    return ctx;
+  }
+
+  function createStage(c) {
+    const eq = c.createBiquadFilter();
+    eq.type = 'peaking';
+
+    const split = c.createBiquadFilter();
+    split.type = 'bandpass';
+
+    const rawMinus = c.createGain();
+    rawMinus.gain.value = -1;
+
+    const processed = c.createGain();
+    const denoiseDry = c.createGain();
+    const denoiseWet = c.createGain();
+    const denoiseSum = c.createGain();
+    const transientDry = c.createGain();
+    const transientWet = c.createGain();
+    const transientSum = c.createGain();
+    const out = c.createGain();
+    const deltaSum = c.createGain();
+
+    eq.connect(out);
+
+    split.connect(rawMinus);
+    rawMinus.connect(out);
+    split.connect(denoiseDry);
+    split.connect(denoiseWet);
+    denoiseDry.connect(denoiseSum);
+    denoiseWet.connect(denoiseSum);
+    denoiseSum.connect(transientDry);
+    denoiseSum.connect(transientWet);
+    transientDry.connect(transientSum);
+    transientWet.connect(transientSum);
+    transientSum.connect(out);
+
+    rawMinus.connect(deltaSum);
+    transientSum.connect(deltaSum);
+    processed.connect(deltaSum);
+
+    return {
+      eq,
+      split,
+      denoiseDry,
+      denoiseWet,
+      denoiseSum,
+      transientDry,
+      transientWet,
+      transientSum,
+      out,
+      deltaSum,
+      denoise: null,
+      transient: null
+    };
+  }
+
+  async function ensureGraph() {
+    const c = ensureContext();
+    if (!graph) {
+      const stages = Array.from({ length: BAND_COUNT }, () => createStage(c));
+      const master = c.createGain();
+      const analyser = c.createAnalyser();
+      analyser.fftSize = 2048;
+      master.connect(analyser);
+      analyser.connect(c.destination);
+      graph = { stages, master, analyser };
+    }
+
+    await c.audioWorklet.addModule('denoise-processor.js?v=clean2');
+    await c.audioWorklet.addModule('transient-processor.js?v=clean2');
+
+    for (const stage of graph.stages) {
+      if (!stage.denoise) {
+        stage.denoise = new AudioWorkletNode(c, 'myefx-denoise', {
+          parameterData: {
+            amount: 0,
+            threshold: 1.5,
+            reduction: 30,
+            adaptation: 1,
+            smoothing: 38,
+            transientProtect: 72,
+            tonalProtect: 12,
+            learn: 0
+          }
+        });
+        stage.denoiseWet.disconnect();
+        stage.denoiseWet.connect(stage.denoise);
+        stage.denoise.connect(stage.denoiseSum);
+      }
+      if (!stage.transient) {
+        stage.transient = new AudioWorkletNode(c, 'myefx-transient', {
+          parameterData: { punch: 0, sustain: 0 }
+        });
+        stage.transientWet.disconnect();
+        stage.transientWet.connect(stage.transient);
+        stage.transient.connect(stage.transientSum);
+      }
+    }
+    syncGraph();
+  }
+
+  function syncGraph() {
+    if (!graph || !ctx) return;
+    const now = ctx.currentTime;
+    currentData().forEach((b, i) => {
+      const s = graph.stages[i];
+      s.eq.frequency.setTargetAtTime(b.freq, now, 0.004);
+      s.eq.Q.setTargetAtTime(b.q, now, 0.004);
+      s.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, 0.004);
+      s.split.frequency.setTargetAtTime(b.freq, now, 0.004);
+      s.split.Q.setTargetAtTime(b.q, now, 0.004);
+
+      const dn = b.bypass ? 0 : b.denoise;
+      s.denoiseDry.gain.setTargetAtTime(b.bypass || b.denoise === 0 ? 1 : 0, now, 0.004);
+      s.denoiseWet.gain.setTargetAtTime(b.bypass || b.denoise === 0 ? 0 : 1, now, 0.004);
+      s.denoise?.parameters.get('amount')?.setTargetAtTime(dn, now, 0.004);
+
+      const mix = b.bypass ? 0 : Math.min(1, (Math.abs(b.punch) + Math.abs(b.sustain)) / 200);
+      s.transientDry.gain.setTargetAtTime(1 - mix, now, 0.004);
+      s.transientWet.gain.setTargetAtTime(mix, now, 0.004);
+      s.transient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, 0.004);
+      s.transient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, 0.004);
+    });
+  }
+
+  function disconnectPlayback() {
+    if (!source) return;
+    try { source.stop(); } catch (_) {}
+    try { source.disconnect(); } catch (_) {}
+    source = null;
+  }
+
+  function connectPlayback() {
+    disconnectPlayback();
+    source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = loop;
+    source.loopStart = 0;
+    source.loopEnd = buffer.duration;
+
+    if (bypassAll) {
+      source.connect(ctx.destination);
+      return;
+    }
+
+    if (deltaBand) {
+      source.connect(graph.stages[deltaBand - 1].split);
+      graph.stages[deltaBand - 1].deltaSum.connect(graph.master);
+      return;
+    }
+
+    let node = source;
+    for (const stage of graph.stages) {
+      node.connect(stage.eq);
+      node.connect(stage.split);
+      node = stage.out;
+    }
+    node.connect(graph.master);
+  }
+
+  async function startPlayback() {
+    if (!buffer) {
+      setStatus('請先載入音檔。');
+      return;
+    }
+    try {
+      const c = ensureContext();
+      await c.resume();
+      await ensureGraph();
+      syncGraph();
+      connectPlayback();
+      startAt = c.currentTime;
+      source.start(0, clamp(offset, 0, Math.max(0, buffer.duration - 0.001)));
+      playing = true;
+      $('play').textContent = '❚❚ 播放中';
+      setStatus(deltaBand ? `DELTA B${deltaBand} 播放中` : bypassAll ? 'BYPASS 播放中' : '播放中');
+      updateCursor();
+    } catch (e) {
+      playing = false;
+      setStatus('播放失敗：' + (e.message || e));
+      console.error(e);
+    }
+  }
+
+  function stopPlayback() {
+    if (playing && ctx && buffer) {
+      const elapsed = Math.max(0, ctx.currentTime - startAt);
+      offset = loop ? (offset + elapsed) % buffer.duration : Math.min(buffer.duration, offset + elapsed);
+    }
+    playing = false;
+    disconnectPlayback();
+    cancelAnimationFrame(raf);
+    raf = 0;
+    $('play').textContent = '▶ 播放';
+    setCursor(buffer ? offset / buffer.duration : 0);
+    setStatus('已停止');
+  }
+
+  function updateCursor() {
+    if (!playing || !buffer || !ctx) return;
+    let p = (offset + (ctx.currentTime - startAt)) / buffer.duration;
+    if (loop) p = ((offset + (ctx.currentTime - startAt)) % buffer.duration) / buffer.duration;
+    if (!loop && p >= 1) {
+      p = 1;
+      playing = false;
+      disconnectPlayback();
+      $('play').textContent = '▶ 播放';
+      setStatus('播放結束');
+    }
+    setCursor(p);
+    if (playing) raf = requestAnimationFrame(updateCursor);
+  }
+
+  function setCursor(p) {
+    p = clamp(p, 0, 1);
+    $('cursorIn').style.left = p * 100 + '%';
+    $('cursorOut').style.left = p * 100 + '%';
+    $('time').textContent = buffer
+      ? `${(p * buffer.duration).toFixed(2)} / ${buffer.duration.toFixed(2)} s`
+      : '0.00 / 0.00 s';
+  }
+
+  function fft(re, im) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [re[i], re[j]] = [re[j], re[i]];
+        [im[i], im[j]] = [im[j], im[i]];
+      }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const a = -2 * Math.PI / len;
+      const w0 = Math.cos(a);
+      const wi0 = Math.sin(a);
+      for (let i = 0; i < n; i += len) {
+        let wr = 1;
+        let wi = 0;
+        const half = len >> 1;
+        for (let j = 0; j < half; j++) {
+          const uR = re[i + j];
+          const uI = im[i + j];
+          const vR = re[i + j + half] * wr - im[i + j + half] * wi;
+          const vI = re[i + j + half] * wi + im[i + j + half] * wr;
+          re[i + j] = uR + vR;
+          im[i + j] = uI + vI;
+          re[i + j + half] = uR - vR;
+          im[i + j + half] = uI - vI;
+          const tr = wr * w0 - wi * wi0;
+          wi = wr * wi0 + wi * w0;
+          wr = tr;
+        }
+      }
+    }
+  }
+
+  function spectrumColor(db) {
+    const v = clamp((db + 90) / 90, 0, 1);
+    const r = Math.floor(255 * clamp((v - 0.62) * 3, 0, 1));
+    const g = Math.floor(255 * clamp((v - 0.28) * 2, 0, 1));
+    const b = Math.floor(255 * clamp((v - 0.02) * 2.7, 0, 1));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function drawSpectrogram(audio, canvas, processed = null) {
+    const id = ++renderToken;
+    const width = canvas.clientWidth || 900;
+    const height = canvas.clientHeight || 220;
+    const n = 512;
+    const half = n >> 1;
+    const left = audio.getChannelData(0);
+    const right = audio.numberOfChannels > 1 ? audio.getChannelData(1) : left;
+    const pLeft = processed ? processed.getChannelData(0) : null;
+    const pRight = processed && processed.numberOfChannels > 1 ? processed.getChannelData(1) : pLeft;
+    const re = new Float32Array(n);
+    const im = new Float32Array(n);
+    const pRe = processed ? new Float32Array(n) : null;
+    const pIm = processed ? new Float32Array(n) : null;
+    const win = new Float32Array(n);
+    for (let i = 0; i < n; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
+
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d', { alpha: false });
+    g.fillStyle = '#02070a';
+    g.fillRect(0, 0, width, height);
+
+    let x = 0;
+    function paint() {
+      if (id !== renderToken) return;
+      for (let z = 0; z < 12 && x < width; z++, x++) {
+        const center = Math.floor(x / Math.max(1, width - 1) * Math.max(0, left.length - 1));
+        const start = center - (n >> 1);
+        for (let i = 0; i < n; i++) {
+          const j = clamp(start + i, 0, left.length - 1);
+          re[i] = ((left[j] + right[j]) * 0.5) * win[i];
+          im[i] = 0;
+          if (processed) {
+            const k = clamp(start + i, 0, pLeft.length - 1);
+            pRe[i] = ((pLeft[k] + pRight[k]) * 0.5) * win[i];
+            pIm[i] = 0;
+          }
+        }
+        fft(re, im);
+        if (processed) fft(pRe, pIm);
+
+        for (let y = 0; y < height; y++) {
+          const f = 20 * Math.pow(1000, 1 - y / Math.max(1, height - 1));
+          const bin = clamp(Math.round(f * n / audio.sampleRate), 1, half);
+          const inputDb = 20 * Math.log10(Math.hypot(re[bin], im[bin]) / n + 1e-8);
+          if (!processed) {
+            g.fillStyle = spectrumColor(inputDb);
+          } else {
+            const outputDb = 20 * Math.log10(Math.hypot(pRe[bin], pIm[bin]) / n + 1e-8);
+            const diff = outputDb - inputDb;
+            const strength = clamp(Math.abs(diff) / 6, 0, 1);
+            if (strength < 0.03) continue;
+            g.fillStyle = diff < 0
+              ? `rgba(45,174,230,${0.2 + 0.8 * strength})`
+              : `rgba(255,150,54,${0.2 + 0.8 * strength})`;
+          }
+          g.fillRect(x, y, 1, 1);
+        }
+      }
+      if (x < width) requestAnimationFrame(paint);
+    }
+    paint();
+  }
+
+  function responseAt(freq) {
+    let total = 0;
+    for (const b of currentData()) {
+      if (b.bypass) continue;
+      const distance = Math.log2(Math.max(20, freq) / b.freq);
+      total += b.gain * Math.exp(-0.5 * Math.pow(distance * b.q * 2, 2));
+    }
+    return total;
+  }
+
+  function drawResponse() {
+    if (!buffer) return;
+    const canvas = $('specIn');
+    const g = canvas.getContext('2d');
+    const w = canvas.width;
+    const top = 76;
+    const y0 = top * 0.66;
+    g.fillStyle = 'rgba(2,7,10,.84)';
+    g.fillRect(0, 0, w, top);
+    g.strokeStyle = 'rgba(120,160,170,.24)';
+    g.lineWidth = 1;
+    for (const f of [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]) {
+      const x = Math.log10(f / 20) / 3 * w;
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.lineTo(x, top);
+      g.stroke();
+    }
+    g.strokeStyle = '#f4ffff';
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let x = 0; x < w; x++) {
+      const f = 20 * Math.pow(1000, x / Math.max(1, w - 1) * 3);
+      const y = y0 - clamp(responseAt(f), -18, 18) * 1.1;
+      if (x) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    g.stroke();
+  }
+
+  function clearProcessed() {
+    const canvas = $('specOut');
+    const g = canvas.getContext('2d');
+    g.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  async function renderOffline(input, data) {
+    const offline = new OfflineAudioContext(2, input.length, input.sampleRate);
+    await offline.audioWorklet.addModule('denoise-processor.js?v=clean2');
+    await offline.audioWorklet.addModule('transient-processor.js?v=clean2');
+
+    const ends = data.map(b => {
+      const eq = offline.createBiquadFilter();
+      eq.type = 'peaking';
+      eq.frequency.value = b.freq;
+      eq.Q.value = b.q;
+      eq.gain.value = b.bypass ? 0 : b.gain;
+
+      const split = offline.createBiquadFilter();
+      split.type = 'bandpass';
+      split.frequency.value = b.freq;
+      split.Q.value = b.q;
+
+      const rawMinus = offline.createGain();
+      rawMinus.gain.value = -1;
+      const out = offline.createGain();
+      const dry = offline.createGain();
+      const wet = offline.createGain();
+      const dSum = offline.createGain();
+      const tDry = offline.createGain();
+      const tWet = offline.createGain();
+      const tSum = offline.createGain();
+
+      const denoise = new AudioWorkletNode(offline, 'myefx-denoise', {
+        parameterData: { amount: b.bypass ? 0 : b.denoise, threshold: 1.5, reduction: 30, adaptation: 1, smoothing: 38, transientProtect: 72, tonalProtect: 12, learn: 0 }
+      });
+      const transient = new AudioWorkletNode(offline, 'myefx-transient', {
+        parameterData: { punch: b.bypass ? 0 : b.punch, sustain: b.bypass ? 0 : b.sustain }
+      });
+
+      eq.connect(out);
+      split.connect(rawMinus);
+      rawMinus.connect(out);
+      split.connect(dry);
+      split.connect(wet);
+      dry.connect(dSum);
+      wet.connect(denoise);
+      denoise.connect(dSum);
+      dSum.connect(tDry);
+      dSum.connect(tWet);
+      tDry.connect(tSum);
+      tWet.connect(transient);
+      transient.connect(tSum);
+      tSum.connect(out);
+
+      dry.gain.value = b.bypass || !b.denoise ? 1 : 0;
+      wet.gain.value = b.bypass || !b.denoise ? 0 : 1;
+      const mix = b.bypass ? 0 : Math.min(1, (Math.abs(b.punch) + Math.abs(b.sustain)) / 200);
+      tDry.gain.value = 1 - mix;
+      tWet.gain.value = mix;
+      return out;
+    });
+
+    const sourceNode = offline.createBufferSource();
+    sourceNode.buffer = input;
+    let node = sourceNode;
+    for (const end of ends) {
+      node.connect(end);
+      node = end;
+    }
+    node.connect(offline.destination);
+    sourceNode.start();
+    return offline.startRendering();
+  }
+
+  async function renderProcessed() {
+    if (!buffer || playing) return;
+    const id = ++renderToken;
+    setStatus('分析 Processed Spectrogram…');
+    try {
+      const output = await renderOffline(buffer, currentData());
+      if (id !== renderToken || playing) return;
+      drawSpectrogram(buffer, $('specOut'), output);
+      setStatus('Processed Spectrogram 已更新。');
+    } catch (e) {
+      clearProcessed();
+      setStatus('Processed Spectrogram 分析失敗：' + (e.message || e));
+      console.warn(e);
+    }
+  }
+
+  function scheduleProcessedRender() {
+    clearTimeout(renderTimer);
+    if (!buffer || playing) return;
+    renderTimer = setTimeout(renderProcessed, 700);
+  }
+
+  async function loadFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith('audio/') && !/\.(wav|wave|aif|aiff|flac|mp3|m4a|ogg)$/i.test(file.name)) {
+      setStatus('請選擇音訊檔。');
+      return;
+    }
+
+    const id = ++loadToken;
+    stopPlayback();
+    buffer = null;
+    offset = 0;
+    clearProcessed();
+    $('fileInfo').textContent = '讀取中…';
+    setStatus('1/3 讀取音檔…');
+
+    try {
+      const c = ensureContext();
+      const bytes = await file.arrayBuffer();
+      if (id !== loadToken) return;
+      setStatus('2/3 解碼 WAV / AIFF / FLAC / MP3…');
+      const decoded = await c.decodeAudioData(bytes.slice(0));
+      if (id !== loadToken) return;
+      if (!decoded || !decoded.length) throw new Error('AudioBuffer 為空');
+
+      buffer = decoded;
+      $('dropUi').style.display = 'none';
+      $('fileInfo').textContent = `${file.name} · ${buffer.numberOfChannels}ch · ${buffer.sampleRate}Hz · ${buffer.duration.toFixed(2)}s`;
+      setCursor(0);
+      requestAnimationFrame(() => {
+        if (id !== loadToken || !buffer) return;
+        drawSpectrogram(buffer, $('specIn'));
+        drawResponse();
+        setStatus('3/3 音檔已載入；播放時才啟用 DSP。');
+        scheduleProcessedRender();
+      });
+    } catch (e) {
+      if (id !== loadToken) return;
+      buffer = null;
+      $('dropUi').style.display = 'flex';
+      $('fileInfo').textContent = '未載入';
+      setStatus('音檔載入失敗：' + (e.name === 'NotSupportedError' ? '瀏覽器不支援此格式' : e.message || e));
+      console.error('myEFX loadFile', e);
+    }
+  }
+
+  function bindFileInput() {
+    const frame = $('inputFrame');
+    const file = $('file');
+
+    file.addEventListener('change', event => {
+      const f = event.target.files?.[0];
+      event.target.value = '';
+      if (f) loadFile(f);
+    });
+
+    frame.addEventListener('click', event => {
+      if (event.target.closest('.drop-card')) return;
+      if (!buffer) {
+        file.click();
+        return;
+      }
+      const rect = frame.getBoundingClientRect();
+      const ratio = (event.clientX - rect.left) / rect.width;
+      stopPlayback();
+      offset = clamp(ratio, 0, 1) * buffer.duration;
+      setCursor(ratio);
+    });
+
+    frame.addEventListener('dragover', event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    });
+
+    frame.addEventListener('drop', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const f = event.dataTransfer?.files?.[0];
+      if (f) loadFile(f);
+    });
+
+    window.addEventListener('dragover', event => {
+      if (event.dataTransfer?.files?.length) event.preventDefault();
+    });
+    window.addEventListener('drop', event => {
+      if (event.dataTransfer?.files?.length) event.preventDefault();
+    });
+  }
+
+  function bindKnobs() {
+    document.querySelectorAll('.knob[data-target]').forEach(knob => {
+      const input = $(knob.dataset.target);
+      let active = false;
+      let startY = 0;
+      let startValue = 0;
+      renderKnob(input);
+
+      knob.addEventListener('pointerdown', event => {
+        active = true;
+        startY = event.clientY;
+        startValue = Number(input.value);
+        knob.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      });
+
+      knob.addEventListener('pointermove', event => {
+        if (!active) return;
+        const key = input.id.replace(/[0-9]+$/, '');
+        const range = INFO[key].max - INFO[key].min;
+        setInput(input, startValue + (startY - event.clientY) * range / 190);
+      });
+
+      const end = event => {
+        active = false;
+        try { knob.releasePointerCapture?.(event.pointerId); } catch (_) {}
+      };
+      knob.addEventListener('pointerup', end);
+      knob.addEventListener('pointercancel', end);
+
+      knob.addEventListener('wheel', event => {
+        event.preventDefault();
+        const key = input.id.replace(/[0-9]+$/, '');
+        setInput(input, Number(input.value) + (event.deltaY < 0 ? INFO[key].step : -INFO[key].step));
+      }, { passive: false });
+
+      knob.addEventListener('dblclick', event => {
+        event.preventDefault();
+        setInput(input, Number(input.defaultValue));
+      });
+
+      knob.addEventListener('keydown', event => {
+        const key = input.id.replace(/[0-9]+$/, '');
+        let value = Number(input.value);
+        if (event.key === 'ArrowUp' || event.key === 'ArrowRight') value += INFO[key].step;
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') value -= INFO[key].step;
+        else if (event.key === 'Home') value = INFO[key].min;
+        else if (event.key === 'End') value = INFO[key].max;
+        else if (event.key === 'Enter') value = Number(input.defaultValue);
+        else return;
+        event.preventDefault();
+        setInput(input, value);
+      });
+
+      input.addEventListener('input', () => {
+        renderKnob(input);
+        saveSlot();
+        syncGraph();
+        drawResponse();
+        scheduleProcessedRender();
+      });
+    });
+  }
+
+  function bindButtons() {
+    $('play').addEventListener('click', () => playing ? stopPlayback() : startPlayback());
+    $('stop').addEventListener('click', stopPlayback);
+    $('loop').addEventListener('click', () => {
+      loop = !loop;
+      $('loop').textContent = `LOOP ${loop ? 'ON' : 'OFF'}`;
+      $('loop').classList.toggle('active', loop);
+      if (source && buffer) {
+        source.loop = loop;
+        source.loopEnd = buffer.duration;
+      }
+    });
+    $('bypassAll').addEventListener('click', () => {
+      bypassAll = !bypassAll;
+      $('bypassAll').textContent = `BYPASS ${bypassAll ? 'ON' : 'OFF'}`;
+      $('bypassAll').classList.toggle('active', bypassAll);
+      if (playing) {
+        const p = offset;
+        stopPlayback();
+        offset = p;
+        startPlayback();
+      }
+    });
+    $('ab').addEventListener('click', () => {
+      saveSlot();
+      slot = slot === 'A' ? 'B' : 'A';
+      $('ab').textContent = `A/B · ${slot}`;
+      applyData(slot === 'A' ? slotA : slotB);
+      setStatus(`已切換到 ${slot}`);
+    });
+    $('resetAll').addEventListener('click', resetAll);
+    $('resetBands').addEventListener('click', resetAll);
+    $('sortBtn').addEventListener('click', sortBands);
+
+    document.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button) return;
+      const card = button.closest('.band');
+      if (!card) return;
+      const i = Number(card.dataset.band);
+      if (button.dataset.action === 'bypass') {
+        setBandBypass(i, !button.classList.contains('on'));
+      } else if (button.dataset.action === 'delta') {
+        deltaBand = deltaBand === i ? 0 : i;
+        document.querySelectorAll('[data-action="delta"]').forEach(b => {
+          const band = b.closest('.band');
+          b.classList.toggle('active', Number(band.dataset.band) === deltaBand);
+        });
+        if (playing) {
+          const p = offset;
+          stopPlayback();
+          offset = p;
+          startPlayback();
+        }
+        setStatus(deltaBand ? `DELTA B${deltaBand}` : 'DELTA OFF');
+      } else if (button.dataset.action === 'reset') {
+        resetBand(i);
+      }
+    });
+  }
+
+  function init() {
+    bindFileInput();
+    bindKnobs();
+    bindButtons();
+    for (let i = 1; i <= BAND_COUNT; i++) {
+      setBandBypass(i, true, false);
+    }
+    const inputCanvas = $('specIn');
+    const outputCanvas = $('specOut');
+    inputCanvas.width = 900;
+    inputCanvas.height = 260;
+    outputCanvas.width = 900;
+    outputCanvas.height = 205;
+    setStatus('尚未載入音檔。');
+  }
+
+  init();
 })();
