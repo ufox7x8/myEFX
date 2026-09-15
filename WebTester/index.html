@@ -1,65 +1,97 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>myEFX Web Tester</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>myEFX — Audio Processor</title>
 <style>
-body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}
-main{max-width:1400px;margin:auto;padding:24px}
-h1,h2,h3{margin-top:0}.small{font-size:12px;color:#999}.section{margin-top:18px}
-.audioBox,.processedBox{position:relative;background:#090909;border:2px dashed #555;border-radius:14px;overflow:hidden;min-height:180px;transition:.15s}
-.audioBox{cursor:pointer}.audioBox.drag{border-color:#fff;background:#181818}.audioBox canvas,.processedBox canvas{display:block;width:100%;height:180px}
-.audioPrompt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aaa;pointer-events:none;line-height:1.7}.audioBox.loaded .audioPrompt{display:none}
-.processedTitle{margin:16px 0 8px;color:#aaa;font-size:14px}.cursor{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:0;pointer-events:none}.time{margin-top:6px;color:#aaa;font-variant-numeric:tabular-nums}
-.transport{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.transport button{padding:10px 14px;border:0;border-radius:8px;cursor:pointer}.transport button.active{outline:2px solid #aaa}.status{margin-top:10px;color:#aaa}
-.band-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px;min-width:0}.controls{display:grid;grid-template-columns:1fr;gap:18px}.param{text-align:center}.param-title{font-size:13px;color:#bbb;margin-bottom:8px}
-.knob{position:relative;width:82px;height:82px;margin:0 auto 7px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3c3c3c 0,#242424 42%,#141414 75%);border:1px solid #555;box-shadow:inset 0 2px 5px #000,0 2px 8px #000;cursor:ns-resize;touch-action:none;user-select:none}
-.knob:before{content:"";position:absolute;inset:6px;border-radius:50%;border:1px solid #444;pointer-events:none}.knob-pointer{position:absolute;left:50%;top:8px;width:3px;height:27px;border-radius:2px;background:#ddd;transform-origin:50% 33px;box-shadow:0 0 4px #fff;pointer-events:none}.knob-input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:ns-resize}.param-value{font-size:12px;color:#ddd;font-variant-numeric:tabular-nums}.param-hint{font-size:10px;color:#777;margin-top:3px}
-.knob-note{margin-top:10px;padding:10px 12px;background:#151515;border-radius:8px;color:#999;font-size:12px;line-height:1.5}
-@media(max-width:1050px){.band-row{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){main{padding:14px}.band-row{grid-template-columns:1fr}}
+:root{
+  --bg:#0b0f14;--panel:#11171f;--panel2:#151c25;--line:#25303b;--line2:#35424f;
+  --text:#e7edf3;--muted:#8996a4;--dim:#5e6a76;--accent:#52c7d9;--accent2:#8ddfe9;
+  --green:#78d39b;--orange:#ff9e57;--danger:#ef6d74;--shadow:0 18px 45px rgba(0,0,0,.34);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:radial-gradient(1200px 500px at 50% -120px,#182532 0%,var(--bg) 58%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;font-size:14px}
+body{padding:24px}
+button,input{font:inherit}
+button{color:inherit}
+.app{width:min(1500px,100%);margin:0 auto}
+.topbar{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#171f28,#10161d);box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--accent2),#2f90a6);box-shadow:0 0 22px rgba(82,199,217,.25)}.brand strong{font-size:16px;letter-spacing:.02em}.brand span{font-size:11px;color:var(--muted);padding-left:9px;border-left:1px solid var(--line2)}
+.top-actions{display:flex;gap:8px}.mini-btn{height:32px;padding:0 11px;border:1px solid var(--line2);border-radius:8px;background:#10161d;color:#9ca8b4;cursor:pointer}.mini-btn:hover{border-color:#556777;color:#e7edf3}
+.section{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(20,27,36,.96),rgba(13,18,24,.98));overflow:hidden;box-shadow:var(--shadow)}
+.section-head{min-height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--line)}.section-title{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a9b6c2}.section-meta{color:var(--dim);font-size:11px}
+.audio-wrap{padding:16px}.drop-zone{position:relative;border:1px solid var(--line2);border-radius:12px;background:#080c11;overflow:hidden;cursor:pointer;transition:border-color .16s,box-shadow .16s,background .16s}.drop-zone:hover{border-color:#536674;background:#0b1117}.drop-zone.drag{border-color:var(--accent);box-shadow:0 0 0 1px rgba(82,199,217,.24),0 0 28px rgba(82,199,217,.12);background:#0b151a}.wave-canvas{display:block;width:100%;height:220px}.drop-prompt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}.prompt-card{padding:16px 24px;border:1px solid #283642;border-radius:12px;background:rgba(10,15,21,.84);backdrop-filter:blur(6px)}.prompt-title{font-size:14px;font-weight:700}.prompt-sub{margin-top:5px;color:var(--muted);font-size:12px}.drop-zone.loaded .drop-prompt{display:none}
+.wave-cursor{position:absolute;top:0;bottom:0;width:2px;left:0;background:#fff;box-shadow:0 0 10px rgba(255,255,255,.65);pointer-events:none}.wave-time{display:flex;justify-content:space-between;margin-top:7px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}.wave-label{margin:12px 0 7px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#8997a5}.wave-label strong{color:#bac5ce;font-weight:600}.processed{height:170px;border:1px solid var(--line);border-radius:10px;background:#090e13;overflow:hidden}.processed .wave-canvas{height:168px}
+.transport{display:flex;align-items:center;gap:8px;margin-top:14px}.transport button{height:36px;padding:0 15px;border:1px solid var(--line2);border-radius:8px;background:#121922;color:#b9c4ce;cursor:pointer}.transport button:hover{border-color:#5a6d7c;color:#f0f5f8}.transport .primary{border-color:#3d98a8;background:linear-gradient(180deg,#1b5660,#143e46);color:#e6fbff;box-shadow:0 0 20px rgba(82,199,217,.12)}.transport .active{border-color:#d1a15f;background:#2a2118;color:#ffd39a}.transport .spacer{flex:1}.status{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+.eq-wrap{padding:12px}.band-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.band{min-width:0;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#151d26,#10161d);overflow:hidden}.band-head{height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid var(--line);background:#131a22}.band-name{font-weight:800;font-size:12px;letter-spacing:.03em}.band-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px rgba(82,199,217,.45)}.band-body{padding:13px 10px 11px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 8px}
+.param{text-align:center;min-width:0}.param-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#7f8c98;margin-bottom:6px}.knob{width:64px;height:64px;margin:0 auto;position:relative;border-radius:50%;border:1px solid #394754;background:radial-gradient(circle at 33% 26%,#39444f 0,#242d36 32%,#141a21 72%);box-shadow:inset 0 2px 7px rgba(255,255,255,.08),inset 0 -6px 9px rgba(0,0,0,.5),0 7px 15px rgba(0,0,0,.25);cursor:ns-resize;touch-action:none;user-select:none}.knob:hover{border-color:#62788a;box-shadow:inset 0 2px 7px rgba(255,255,255,.08),inset 0 -6px 9px rgba(0,0,0,.5),0 0 18px rgba(82,199,217,.13)}.knob:after{content:"";position:absolute;inset:6px;border-radius:50%;border:1px solid rgba(255,255,255,.05);pointer-events:none}.knob-pointer{position:absolute;left:50%;top:7px;width:2px;height:19px;border-radius:3px;background:#cfe9ee;transform-origin:50% 25px;box-shadow:0 0 5px rgba(141,223,233,.65);pointer-events:none}.param-value{margin-top:6px;font-size:11px;color:#dbe4ea;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.param-hint{min-height:12px;margin-top:2px;font-size:9px;color:#53616e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.band-foot{display:flex;gap:6px;padding:9px 10px;border-top:1px solid var(--line)}.band-chip{flex:1;min-width:0;height:27px;border:1px solid #2b3743;border-radius:7px;background:#111820;color:#758390;font-size:10px;cursor:pointer}.band-chip:hover{color:#b9c4cc;border-color:#485966}.note{padding:10px 14px;color:#677582;font-size:10px}
+@media(max-width:1050px){body{padding:14px}.band-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){body{padding:8px}.topbar{height:52px;padding:0 12px}.brand span,.top-actions .mini-btn:nth-child(n+2){display:none}.wave-canvas{height:180px}.processed{height:138px}.processed .wave-canvas{height:136px}.band-grid{grid-template-columns:1fr}.band-body{grid-template-columns:repeat(3,minmax(0,1fr))}.transport{flex-wrap:wrap}.status{width:100%;max-width:100%}}
 </style>
 </head>
 <body>
-<main>
-<h1>myEFX Web Tester</h1>
-<p class="small">4 Band：每個 Band 各自 EQ + De-noise + Transient，Transient / De-noise 只作用於該 Band 的 Frequency + Q 頻寬。</p>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="logo"></div><strong>myEFX</strong><span>4-Band Dynamic Processor</span></div>
+    <div class="top-actions"><button class="mini-btn" id="resetAll" type="button">RESET</button><button class="mini-btn" id="about" type="button">WEB TESTER</button></div>
+  </header>
 
-<div class="audioBox" id="audioBox"><canvas id="wave"></canvas><div class="cursor" id="cursor"></div><div class="audioPrompt" id="audioPrompt">把 WAV / AIFF 拖到這裡<br>或點一下選擇音檔</div><input id="file" type="file" accept="audio/*" hidden></div>
-<div class="time" id="time">0.00 / 0.00 s</div>
-<div class="processedTitle">Processed Waveform｜播放時即時繪製處理後訊號</div>
-<div class="processedBox" id="processedBox"><canvas id="processedWave"></canvas></div>
+  <section class="section">
+    <div class="section-head"><div class="section-title">INPUT / OUTPUT</div><div class="section-meta">WAV / AIFF / other browser-decodable audio</div></div>
+    <div class="audio-wrap">
+      <div class="drop-zone" id="audioBox">
+        <canvas class="wave-canvas" id="wave"></canvas>
+        <div class="wave-cursor" id="cursor"></div>
+        <div class="drop-prompt"><div class="prompt-card"><div class="prompt-title">拖曳音檔到這裡</div><div class="prompt-sub">或點一下選擇 WAV / AIFF</div></div></div>
+        <input id="file" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.flac,.mp3,.m4a,.ogg" hidden>
+      </div>
+      <div class="wave-time"><span id="time">0.00 / 0.00 s</span><span id="fileInfo">未載入</span></div>
+      <div class="wave-label"><strong>PROCESSED WAVEFORM</strong><span>播放到哪裡，就即時顯示到哪裡</span></div>
+      <div class="processed"><canvas class="wave-canvas" id="processedWave"></canvas></div>
+      <div class="transport">
+        <button class="primary" id="play" type="button">▶ 播放</button>
+        <button id="stop" type="button">■ 停止</button>
+        <button id="loop" type="button">LOOP OFF</button>
+        <button id="bypass" type="button">BYPASS OFF</button>
+        <button id="ab" type="button">A/B · A</button>
+        <div class="spacer"></div><div class="status" id="status">尚未載入音檔。</div>
+      </div>
+    </div>
+  </section>
 
-<div class="transport"><button id="play" type="button">播放</button><button id="stop" type="button">停止</button><button id="loop" type="button">LOOP：OFF</button><button id="bypass" type="button">Bypass：OFF</button><button id="ab" type="button">A/B：A</button></div>
-<div class="status" id="status">尚未載入音檔。</div>
-
-<div class="section"><h2>4-Band EQ + De-noise + Transient</h2><div class="band-row" id="bands"></div></div>
-<div class="knob-note">旋鈕：滑鼠按住上下拖曳；雙擊回復預設。Gain / Attack / Sustain：12 點鐘 = 0。De-noise：7 點鐘 = 0%。</div>
-</main>
+  <section class="section">
+    <div class="section-head"><div class="section-title">4-BAND PROCESSING</div><div class="section-meta">EQ · DE-NOISE · TRANSIENT</div></div>
+    <div class="eq-wrap"><div class="band-grid" id="bands"></div></div>
+    <div class="note">旋鈕：上下拖曳精調、滾輪微調、雙擊回預設。每個 Band 的 De-noise / Transient 都只作用於該 Band 的 Freq + Q 頻寬。</div>
+  </section>
+</div>
 
 <script>
 const bands=document.getElementById('bands');
 const defs=[100,500,2000,8000];
 const params=[
- ['Freq','freq','range','20','20000','1','Hz'],
- ['Gain','gain','range','-24','24','0.1','dB'],
- ['Q','q','range','0.1','20','0.01',''],
- ['De-noise','denoise','range','0','100','1','%'],
- ['Attack','attack','range','-100','100','1','%'],
- ['Sustain','sustain','range','-100','100','1','%']
+ ['Freq','freq','20','20000','1','Hz'],
+ ['Gain','gain','-24','24','0.1','dB'],
+ ['Q','q','0.1','20','0.01',''],
+ ['De-noise','denoise','0','100','1','%'],
+ ['Attack','attack','-100','100','1','%'],
+ ['Sustain','sustain','-100','100','1','%']
 ];
 for(let b=1;b<=4;b++){
- const card=document.createElement('div');card.className='card';card.innerHTML=`<h3>Band ${b}</h3><div class="controls"></div>`;
- const controls=card.querySelector('.controls');
- for(const [title,key,type,min,max,step,unit] of params){
-   const id=key+b; const value=key==='freq'?defs[b-1]:(key==='q'?1:0);
-   const hint=key==='denoise'?'0 = 7 點鐘':(key==='gain'||key==='attack'||key==='sustain'?'0 = 12 點鐘':'');
-   const p=document.createElement('div');p.className='param';
-   p.innerHTML=`<div class="param-title">${title}</div><div class="knob" data-target="${id}"><div class="knob-pointer"></div><input id="${id}" class="knob-input" type="${type}" min="${min}" max="${max}" value="${value}" step="${step}" ${key==='freq'?'data-unit="Hz"':''}><div class="param-value" id="${id}Out">${value}${unit}</div>${hint?`<div class="param-hint">${hint}</div>`:''}</div>`;
-   controls.appendChild(p);
- }
- bands.appendChild(card);
+  const card=document.createElement('article'); card.className='band';
+  card.innerHTML=`<div class="band-head"><span class="band-name">BAND ${b}</span><span class="band-dot"></span></div><div class="band-body"></div><div class="band-foot"><button class="band-chip" data-action="reset" data-band="${b}" type="button">RESET BAND</button><button class="band-chip" data-action="zero" data-band="${b}" type="button">0 dB / 0%</button></div>`;
+  const body=card.querySelector('.band-body');
+  for(const [title,key,min,max,step,unit] of params){
+    const id=key+b; const value=key==='freq'?defs[b-1]:(key==='q'?1:0);
+    const p=document.createElement('div');p.className='param';
+    p.innerHTML=`<div class="param-label">${title}</div><div class="knob" data-target="${id}" tabindex="0" title="${title}"><div class="knob-pointer"></div><div class="param-value" id="${id}Out">${value}${unit}</div><div class="param-hint">${key==='denoise'?'7 o’clock = 0':(key==='gain'||key==='attack'||key==='sustain'?'12 o’clock = 0':'')}</div></div><input id="${id}" class="knob-input" type="range" min="${min}" max="${max}" value="${value}" step="${step}" hidden>`;
+    body.appendChild(p);
+  }
+  bands.appendChild(card);
 }
 </script>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>
