@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>myEFX Web Tester</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#111;color:#eee}main{max-width:1100px;margin:auto;padding:24px}.drop{border:2px dashed #555;border-radius:14px;padding:28px;text-align:center;margin-bottom:18px}.row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{background:#1c1c1c;border-radius:12px;padding:16px}.controls{display:grid;gap:10px}label{display:grid;grid-template-columns:100px 1fr 70px;gap:8px;align-items:center}input[type=range]{width:100%}button{padding:10px 14px;border:0;border-radius:8px;cursor:pointer}.transport{display:flex;gap:8px;flex-wrap:wrap}.status{margin-top:10px;color:#aaa}.small{font-size:12px;color:#999}@media(max-width:800px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>myEFX Web Tester</h1>
+<p class="small">第一版：瀏覽器即時 EQ 測試。DSP 核心之後可替換成 WebAssembly。請使用 Chrome / Edge。</p>
+<div id="drop" class="drop">把 WAV / AIFF 拖到這裡，或 <input id="file" type="file" accept="audio/*"></div>
+<div class="transport">
+<button id="play">播放</button><button id="stop">停止</button><button id="bypass">Bypass：OFF</button><button id="ab">A/B：A</button>
+</div>
+<div class="status" id="status">尚未載入音檔。</div>
+<div class="row" style="margin-top:18px">
+<div class="card"><h2>Band 1</h2><div class="controls"><label>Freq<input id="freq" type="range" min="20" max="20000" value="1000" step="1"><output id="freqOut">1000 Hz</output></label><label>Gain<input id="gain" type="range" min="-24" max="24" value="0" step="0.1"><output id="gainOut">0.0 dB</output></label><label>Q<input id="q" type="range" min="0.1" max="20" value="1" step="0.01"><output id="qOut">1.00</output></label></div></div>
+<div class="card"><h2>Dynamic（預留）</h2><div class="controls"><label>Range<input id="dyn" type="range" min="0" max="24" value="0" step="0.1"><output id="dynOut">0.0 dB</output></label><p class="small">目前 UI 參數先保留，後續接真正 Dynamic DSP。</p></div></div>
+<div class="card"><h2>Transient / De-noise（預留）</h2><div class="controls"><label>Transient<input id="trans" type="range" min="-100" max="100" value="0"><output id="transOut">0%</output></label><label>De-noise<input id="denoise" type="range" min="0" max="100" value="0"><output id="denoiseOut">0%</output></label><p class="small">之後會替換成我們自己的頻率選擇式 Transient / De-noise 演算法。</p></div></div>
+</div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
