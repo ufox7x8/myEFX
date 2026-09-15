@@ -9,7 +9,55 @@ const defaults=[
 let slotA={bands:structuredClone(defaults)},slotB={bands:structuredClone(defaults)};
 const $=id=>document.getElementById(id);
 function fmt(v,u=''){return `${Number(v).toFixed(u==='Hz'?0:u==='dB'?1:2)} ${u}`.trim()}
-function updateOut(){for(let i=1;i<=4;i++){ $(`freq${i}Out`).value=fmt($(`freq${i}`).value,'Hz');$(`gain${i}Out`).value=fmt($(`gain${i}`).value,'dB');$(`q${i}Out`).value=fmt($(`q${i}`).value);$(`denoise${i}Out`).value=`${$('denoise'+i).value}%`;$(`attack${i}Out`).value=`${$('attack'+i).value}%`;$(`sustain${i}Out`).value=`${$('sustain'+i).value}%`;}}
+function knobAngle(id){
+ const el=$(id);if(!el)return 225;
+ const min=Number(el.min),max=Number(el.max),v=Number(el.value);
+ const ratio=(v-min)/(max-min||1);
+ return 225+(270*ratio);
+}
+function updateKnob(id){
+ const knob=document.querySelector(`.knob[data-target="${id}"]`);if(!knob)return;
+ const p=knob.querySelector('.knob-pointer');
+ if(p)p.style.transform=`translateX(-50%) rotate(${knobAngle(id)-360}deg)`;
+}
+function updateOut(){
+ for(let i=1;i<=4;i++){
+  $(`freq${i}Out`).textContent=fmt($(`freq${i}`).value,'Hz');
+  $(`gain${i}Out`).textContent=fmt($(`gain${i}`).value,'dB');
+  $(`q${i}Out`).textContent=fmt($(`q${i}`).value);
+  $(`denoise${i}Out`).textContent=`${$('denoise'+i).value}%`;
+  $(`attack${i}Out`).textContent=`${$('attack'+i).value}%`;
+  $(`sustain${i}Out`).textContent=`${$('sustain'+i).value}%`;
+  ['freq','gain','q','denoise','attack','sustain'].forEach(p=>updateKnob(p+i));
+ }
+}
+function initKnobs(){
+ document.querySelectorAll('.knob').forEach(knob=>{
+  const id=knob.dataset.target,input=$(id);if(!input)return;
+  let active=false,startY=0,startValue=0,moved=false;
+  knob.addEventListener('pointerdown',e=>{
+   active=true;moved=false;startY=e.clientY;startValue=Number(input.value);knob.setPointerCapture?.(e.pointerId);e.preventDefault();
+  });
+  knob.addEventListener('pointermove',e=>{
+   if(!active)return;
+   const min=Number(input.min),max=Number(input.max),step=Number(input.step)||1;
+   const range=max-min;
+   let v=startValue+(startY-e.clientY)*(range/160);
+   v=Math.max(min,Math.min(max,v));
+   v=Math.round(v/step)*step;
+   input.value=String(v);
+   input.dispatchEvent(new Event('input',{bubbles:true}));
+   moved=true;e.preventDefault();
+  });
+  const end=e=>{if(!active)return;active=false;try{knob.releasePointerCapture?.(e.pointerId)}catch{}};
+  knob.addEventListener('pointerup',end);knob.addEventListener('pointercancel',end);
+  knob.addEventListener('dblclick',e=>{e.preventDefault();
+   const reset=(id.startsWith('freq'))?Number(input.defaultValue):(id.startsWith('q')?1:0);
+   input.value=String(reset);input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+ });
+ updateOut();
+}
 function makeStage(){
  const eq=ctx.createBiquadFilter();eq.type='peaking';
  const pass=ctx.createBiquadFilter();pass.type='bandpass';
@@ -53,4 +101,4 @@ function updateCursor(){if(!playing||!ctx||!buffer)return;const elapsed=ctx.curr
 function drawWaveform(){const c=$('wave'),wrap=$('waveWrap');if(!c||!buffer)return;const w=Math.max(600,Math.floor(wrap.clientWidth*2)),h=180;c.width=w;c.height=h;const g=c.getContext('2d');g.clearRect(0,0,w,h);const ch=buffer.getChannelData(0),step=Math.max(1,Math.floor(ch.length/w));g.beginPath();for(let x=0;x<w;x++){let min=1,max=-1;const start=x*step,end=Math.min(ch.length,start+step);for(let i=start;i<end;i++){const v=ch[i];if(v<min)min=v;if(v>max)max=v}g.moveTo(x,h/2+min*h*.45);g.lineTo(x,h/2+max*h*.45)}g.strokeStyle='#7fa7d9';g.lineWidth=1;g.stroke();g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.strokeStyle='#444';g.stroke()}
 function setupDrop(){const drop=$('drop'),file=$('file'),choose=$('choose');choose.onclick=e=>{e.preventDefault();file.click()};file.onchange=e=>{const f=e.target.files?.[0];if(f)loadFile(f)};['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.add('drag');e.dataTransfer.dropEffect='copy'}));['dragleave','dragend'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('drag');const f=e.dataTransfer?.files?.[0];if(f)loadFile(f)});const wave=$('waveWrap');wave.addEventListener('click',e=>{const r=e.offsetX/wave.clientWidth;seekByRatio(r)});window.addEventListener('resize',()=>drawWaveform())}
 for(let i=1;i<=4;i++)['freq','gain','q','denoise','attack','sustain'].forEach(p=>$(p+i).addEventListener('input',()=>{updateOut();saveCurrent();syncEQ();syncDenoise();syncTransient()}));
-$('play').onclick=start;$('stop').onclick=stop;$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;if(source)connectPlaybackChain()};$('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};updateOut();
+$('play').onclick=start;$('stop').onclick=stop;$('bypass').onclick=()=>{bypass=!bypass;$('bypass').textContent=`Bypass：${bypass?'ON':'OFF'}`;if(source)connectPlaybackChain()};$('ab').onclick=()=>{$('ab').textContent=$('ab').textContent.endsWith('A')?'A/B：B':'A/B：A';loadSlot()};updateOut();initKnobs();
