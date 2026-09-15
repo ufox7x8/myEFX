@@ -38,14 +38,12 @@
     if (!c || c.state === 'closed') {
       c = new (window.AudioContext || window.webkitAudioContext)();
       window.__myEFXDecodeContext = c;
-      // Reset nodes belonging to a closed/invalid context.
       window.eval('ctx = window.__myEFXDecodeContext; stages = []; outputGain = null; analyser = null; source = null; playing = false;');
     }
     return c;
   }
 
-  async function decode(file) {
-    const serial = ++loadSerial;
+  async function decode(file, serial) {
     if (!audioFile(file)) throw new Error('不支援的音檔格式');
 
     const c = await getContext();
@@ -58,11 +56,8 @@
 
     let decoded;
     try {
-      // Promise form is the standard Web Audio API path. Use the original
-      // complete ArrayBuffer, not a detached/reused partial view.
       decoded = await withTimeout(c.decodeAudioData(bytes), 60000, '音檔解碼');
     } catch (promiseError) {
-      // A few older implementations are more reliable through callbacks.
       decoded = await withTimeout(new Promise((resolve, reject) => {
         try {
           c.decodeAudioData(bytes.slice(0), resolve, reject);
@@ -89,12 +84,8 @@
 
     const serial = ++loadSerial;
     try {
-      if (typeof window.stop === 'function') {
-        try { window.stop(); } catch {}
-      }
-
       say(`正在讀取：${file.name}`);
-      const decoded = await decode(file);
+      const decoded = await decode(file, serial);
       if (!decoded || serial !== loadSerial) return;
 
       setAppVars(decoded);
@@ -110,8 +101,6 @@
         if (g) g.clearRect(0, 0, specOut.width, specOut.height);
       }
 
-      // File loading is complete at this point. Spectrogram work starts on the
-      // next animation frame so a heavy visual render cannot block the load path.
       say(`音檔已載入：${file.name}`);
       window.__myEFXHasBuffer = true;
 
@@ -132,9 +121,6 @@
     }
   }
 
-  // Override only the public handoff used by the capture-phase file I/O layer.
-  // app.js's internal lexical loadFile remains untouched; all visible file input
-  // events are intercepted by file-io-hardfix.js before they reach it.
   window.myEFXLoadFile = loadFile;
   window.loadFile = loadFile;
   window.__myEFXLoadRepairReady = true;
