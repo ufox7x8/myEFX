@@ -31,17 +31,27 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Validate 8-band UI
+          node --check WebTester/knob-ui.js
+      - name: Validate generated 8-band knob UI
         run: |
           python - <<'PY'
           from pathlib import Path
           s=Path('WebTester/index.html').read_text(encoding='utf-8')
-          for i in range(1,9):
-              assert f'id="freq{i}"' in s
-              assert f'id="byp{i}"' in s
-              assert f'id="delta{i}"' in s
-          assert 'perf-fix.js' not in s
-          print('8-band UI validation OK')
+          required=[
+              'const bandsEl',
+              'defaults=[31.5,63,125,250,500,1000,2500,8000]',
+              'const knobDefs',
+              'data-action="bypass"',
+              'data-action="delta"',
+              'class="knob"',
+              'knob-ui.js'
+          ]
+          missing=[x for x in required if x not in s]
+          if missing:
+              raise SystemExit('Missing UI markers: '+', '.join(missing))
+          if 'perf-fix.js' in s:
+              raise SystemExit('Legacy perf-fix.js must not be loaded by index.html')
+          print('8-band generated knob UI validation OK')
           PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
