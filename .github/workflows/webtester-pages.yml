@@ -33,6 +33,7 @@ jobs:
           node --check WebTester/transient-processor.js
           node --check WebTester/knob-ui.js
           node --check WebTester/io-fix.js
+          node --check WebTester/four-band-fix.js
       - name: Validate generated 4-band knob UI
         run: |
           python - <<'PY'
@@ -46,7 +47,8 @@ jobs:
               'data-action="delta"',
               'class="knob"',
               'knob-ui.js',
-              'io-fix.js'
+              'io-fix.js',
+              'four-band-fix.js'
           ]
           missing=[x for x in required if x not in s]
           if missing:
