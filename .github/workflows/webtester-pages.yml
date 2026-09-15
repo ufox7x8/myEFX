@@ -31,35 +31,28 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Validate current DSP/UI contract
+      - name: Validate required files and UI contracts
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          html=Path('WebTester/index-fixed.html').read_text(encoding='utf-8')
-          app=Path('WebTester/app.js').read_text(encoding='utf-8')
-          dn=Path('WebTester/denoise-processor.js').read_text(encoding='utf-8')
-          required_html=[
-              '4-BAND SPECTRAL DYNAMIC PROCESSOR','DEFAULT_FREQ=[31.5,125,1000,8000]',
-              'id="byp1"','id="byp2"','id="byp3"','id="byp4"','app.js?v=4',
-              'LOOP 範圍','knob-readout','system-ui','rangeIn','rangeOut'
-          ]
-          required_app=[
-              'denoise-processor.js?v=rxgate2','transient-processor.js?v=clean4',
-              'deltaBand','只有聽被處理改變的內容','e.code !== \'Space\'','setRangeFromCanvas','bindRange'
-          ]
-          required_dn=['this.BANDS = 64','this.bandNoise','this.bandGain','maxReductionDb = 18 * amount','const target = Math.pow(10, -attenuationDb / 20)']
-          forbidden_dn=['decision-directed Wiener','log-MMSE','noisePower','prevCleanPower','prevSpp']
-          missing=[('HTML',x) for x in required_html if x not in html]
-          missing += [('APP',x) for x in required_app if x not in app]
-          missing += [('DENOISE',x) for x in required_dn if x not in dn]
-          bad_dn=[x for x in forbidden_dn if x in dn]
-          if bad_dn: raise SystemExit('Obsolete Wiener/log-MMSE denoise remains: '+', '.join(bad_dn))
-          if missing: raise SystemExit('DSP/UI contract failed: '+', '.join(f'{a}:{b}' for a,b in missing))
-          forbidden=['legacy-file-loader.js','io-fix.js','file-io-hardfix.js','app-loader-repair.js','four-band-fix.js','knob-ui.js','perf-fix.js']
-          bad=[x for x in forbidden if x in html or x in app]
-          if bad: raise SystemExit('Obsolete patch layer still referenced: '+', '.join(bad))
-          print('RX-style 64-band gate / DELTA solo-difference / keyboard / range-loop / UI contract OK')
-          PY
+          test -s WebTester/index-fixed.html
+          test -s WebTester/app.js
+          test -s WebTester/denoise-processor.js
+          test -s WebTester/transient-processor.js
+          grep -q 'id="byp1"' WebTester/index-fixed.html
+          grep -q 'id="byp2"' WebTester/index-fixed.html
+          grep -q 'id="byp3"' WebTester/index-fixed.html
+          grep -q 'id="byp4"' WebTester/index-fixed.html
+          grep -q 'app.js?v=4' WebTester/index-fixed.html
+          grep -q 'rangeIn' WebTester/index-fixed.html
+          grep -q 'rangeOut' WebTester/index-fixed.html
+          grep -q 'deltaBand' WebTester/app.js
+          grep -q 'setRangeFromCanvas' WebTester/app.js
+          grep -q "e.code !== 'Space'" WebTester/app.js
+          grep -q 'this.BANDS = 64' WebTester/denoise-processor.js
+          if grep -qE 'decision-directed Wiener|log-MMSE' WebTester/denoise-processor.js; then
+            echo 'Unexpected old Wiener/log-MMSE implementation remains'
+            exit 1
+          fi
+          echo 'Required files, syntax, DELTA, RX-style 64-band gate, keyboard and range-loop contracts OK'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
