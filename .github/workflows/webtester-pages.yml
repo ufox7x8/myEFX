@@ -32,13 +32,13 @@ jobs:
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
           node --check WebTester/knob-ui.js
-          node --check WebTester/io-fix.js
+          node --check WebTester/legacy-file-loader.js
           node --check WebTester/four-band-fix.js
-      - name: Validate generated 4-band knob UI
+      - name: Validate deployed 4-band entry
         run: |
           python - <<'PY'
           from pathlib import Path
-          s=Path('WebTester/index.html').read_text(encoding='utf-8')
+          s=Path('WebTester/index-fixed.html').read_text(encoding='utf-8')
           required=[
               '4-BAND SPECTRAL DYNAMIC PROCESSOR',
               'defaults=[31.5,125,1000,8000]',
@@ -46,21 +46,22 @@ jobs:
               'data-action="bypass"',
               'data-action="delta"',
               'class="knob"',
-              'knob-ui.js',
-              'io-fix.js',
-              'four-band-fix.js'
+              'legacy-file-loader.js'
           ]
           missing=[x for x in required if x not in s]
           if missing:
               raise SystemExit('Missing UI markers: '+', '.join(missing))
-          if 'perf-fix.js' in s:
-              raise SystemExit('Legacy perf-fix.js must not be loaded by index.html')
-          print('4-band generated knob UI validation OK')
+          if 'io-fix.js' in s:
+              raise SystemExit('Layered io-fix.js must not be deployed')
+          print('Clean 4-band entry validation OK')
           PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
-        run: mkdir -p _site && cp -R WebTester/. _site/
+        run: |
+          mkdir -p _site
+          cp -R WebTester/. _site/
+          cp WebTester/index-fixed.html _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
