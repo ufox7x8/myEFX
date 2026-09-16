@@ -27,19 +27,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Build canonical WebTester app
-        run: |
-          node WebTester/build-v5-fix.js
+        run: node WebTester/build-v5-fix.js
       - name: Validate JavaScript syntax
         run: |
           node --check WebTester/build-v5-fix.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify.js
           node --check WebTester/delta-verify-500.js
+          node --check WebTester/delta-verify-500-v2.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
       - name: Run DELTA 500-run verification
-        run: |
-          node WebTester/delta-verify-500.js
+        run: node WebTester/delta-verify-500-v2.js
       - name: Validate required files and DELTA graph contract
         run: |
           test -s WebTester/index-fixed.html
@@ -53,10 +52,8 @@ jobs:
           grep -q 'app.js?v=5' WebTester/index-fixed.html
           grep -q 'rangeIn' WebTester/index-fixed.html
           grep -q 'rangeOut' WebTester/index-fixed.html
-          grep -q 'deltaBandHP1' WebTester/app.js
-          grep -q 'deltaBandHP2' WebTester/app.js
-          grep -q 'deltaBandLP1' WebTester/app.js
-          grep -q 'deltaBandLP2' WebTester/app.js
+          grep -q 'deltaBandBP1' WebTester/app.js
+          grep -q 'deltaBandBP2' WebTester/app.js
           grep -q 'deltaEQ' WebTester/app.js
           grep -q 'deltaDenoise' WebTester/app.js
           grep -q 'deltaTransient' WebTester/app.js
@@ -64,10 +61,25 @@ jobs:
           grep -q 'deltaMute' WebTester/app.js
           grep -q 'deltaDryDelay' WebTester/app.js
           grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 1024' WebTester/app.js
-          grep -q 'source.connect(selected.deltaBandHP1)' WebTester/app.js
+          grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta9' WebTester/app.js
-          grep -q 'transient-processor.js?v=delta9' WebTester/app.js
+          grep -q 's.deltaBandBP1.Q.setTargetAtTime(q' WebTester/app.js
+          grep -q 's.deltaBandBP2.Q.setTargetAtTime(q' WebTester/app.js
+          grep -q 's.deltaEQ.Q.setTargetAtTime(q' WebTester/app.js
+          grep -q 'denoise-processor.js?v=delta11' WebTester/app.js
+          grep -q 'transient-processor.js?v=delta11' WebTester/app.js
+          if grep -q 'deltaBandHP1' WebTester/app.js; then
+            echo 'Old HP/LP DELTA isolation remains'
+            exit 1
+          fi
+          if grep -q 'deltaBandLP1' WebTester/app.js; then
+            echo 'Old HP/LP DELTA isolation remains'
+            exit 1
+          fi
+          if grep -q 'boundaries = new Map' WebTester/app.js; then
+            echo 'Old inter-Section crossover calculation remains'
+            exit 1
+          fi
           if grep -q 'Feed prior sections normally' WebTester/app.js; then
             echo 'Old multi-Section DELTA routing remains'
             exit 1
@@ -76,7 +88,7 @@ jobs:
             echo 'Old mixed WetBand/DryBand DELTA architecture remains'
             exit 1
           fi
-          echo 'DELTA contract OK.'
+          echo 'DELTA FREQ/Q contract OK.'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
