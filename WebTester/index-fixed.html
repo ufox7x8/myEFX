@@ -29,11 +29,11 @@
 <article class="band b1" data-band="1"><div class="band-head"><span class="bnum">SECTION 1</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp1" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state1">ON</span></div></div></article>
 <article class="band b2" data-band="2"><div class="band-head"><span class="bnum">SECTION 2</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp2" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state2">ON</span></div></div></article>
 <article class="band b3" data-band="3"><div class="band-head"><span class="bnum">SECTION 3</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp3" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state3">ON</span></div></div></article>
-<article class="band b4" data-band="4"><div class="band-head"><span class="bnum">SECTION 4</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button data-action="bypass" class="band-byp on" id="byp4" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state4">ON</span></div></div></article>
+<article class="band b4" data-band="4"><div class="band-head"><span class="bnum">SECTION 4</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp4" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state4">ON</span></div></div></article>
 </div><div class="note">正常輸出：原始完整訊號 + 4 個 Section 各自的 Wet−Dry 異動。DELTA：只監聽目前選定 Section 的頻帶 Wet−Dry。BYPASS：該 Section 完全不加入變化。DE-NOISE / PUNCH / SUSTAIN 必須在實際參數造成變化後才會出現在 DELTA。</div></section>
 </div>
 <script>
-const KNOBS=[['FREQ','freq',20,20000,1],['GAIN','gain',-24,24,.1],['Q','q',.1,20,.01],['DE-NOISE','denoise',0,100,1],['PUNCH','punch',-100,100,1],['SUSTAIN','sustain',-100,100,1]];
+const KNOBS=[['FREQ','freq',20,20000,.1],['GAIN','gain',-24,24,.1],['Q','q',.1,20,.01],['DE-NOISE','denoise',0,100,1],['PUNCH','punch',-100,100,1],['SUSTAIN','sustain',-100,100,1]];
 const DEFAULT_FREQ=[31.5,125,1000,8000];
 for(const [idx,card] of [...document.querySelectorAll('.band')].entries()){
   const grid=card.querySelector('.knob-grid');
@@ -44,7 +44,7 @@ for(const [idx,card] of [...document.querySelectorAll('.band')].entries()){
   }
 }
 </script>
-<script src="app.js?v=13"></script>
+<script src="app.js?v=14"></script>
 <script>
 document.querySelectorAll('.knob-input').forEach(input => {
   const knob=document.querySelector('.knob[data-target="'+input.id+'"]');
