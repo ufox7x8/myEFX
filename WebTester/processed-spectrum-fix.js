@@ -10,7 +10,6 @@ function replaceBetween(text, start, end, replacement) {
   return text.slice(0, a) + replacement + text.slice(b);
 }
 
-// INPUT is static: it is rendered once when the file changes (and only re-rendered on resize).
 const drawStatic = `  function drawInputSpectrogram() {
     if (!buffer) return;
     const canvas = $('specIn');
@@ -36,16 +35,12 @@ const drawStatic = `  function drawInputSpectrogram() {
       }
       fft(re, im);
       for (let y = 0; y < H; y++) {
-        const norm = 1 - y / Math.max(1, H - 1);
-        const f = 20 * Math.pow(1000, norm);
+        const norm = 1 - y / Math.max(1, H - 1), f = 20 * Math.pow(1000, norm);
         const k = clamp(Math.round(f * N / sr), 1, bins - 1);
         const mag = Math.hypot(re[k], im[k]) / N;
         const q = Math.pow(clamp((20 * Math.log10(mag + 1e-8) + 86) / 72, 0, 1), .68);
         const idx = (y * W + x) * 4;
-        px[idx] = 18 + 190 * q;
-        px[idx + 1] = 3 + 42 * q;
-        px[idx + 2] = 12 + 54 * q;
-        px[idx + 3] = 255;
+        px[idx] = 18 + 190 * q; px[idx + 1] = 3 + 42 * q; px[idx + 2] = 12 + 54 * q; px[idx + 3] = 255;
       }
     }
     c.putImageData(img, 0, 0);
@@ -54,8 +49,6 @@ const drawStatic = `  function drawInputSpectrogram() {
 `;
 s = replaceBetween(s, '  function drawInputSpectrogram()', '  function createOfflineStage(c)', drawStatic + '\n');
 
-// Realtime PROCESSED view. It reads the actual processed signal from an AnalyserNode instead
-// of rendering the complete file through OfflineAudioContext on every knob movement.
 const live = `  function ensureProcessedAnalyser() {
     if (!ctx || !graph) return null;
     if (!graph.processedAnalyser) {
@@ -81,24 +74,17 @@ const live = `  function ensureProcessedAnalyser() {
     const c = canvas.getContext('2d', { alpha: false });
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (clear) { c.fillStyle = '#050304'; c.fillRect(0, 0, W, H); }
-
     const data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(data);
     const x = W - 1;
-    const img = c.getImageData(1, 0, W - 1, H);
-    c.putImageData(img, 0, 0);
+    if (W > 1) c.drawImage(canvas, 1, 0, W - 1, H, 0, 0, W - 1, H);
     const col = c.createImageData(1, H), px = col.data;
     const bins = data.length, nyquist = ctx ? ctx.sampleRate * 0.5 : 24000;
     for (let y = 0; y < H; y++) {
-      const norm = 1 - y / Math.max(1, H - 1);
-      const f = 20 * Math.pow(1000, norm);
+      const norm = 1 - y / Math.max(1, H - 1), f = 20 * Math.pow(1000, norm);
       const k = clamp(Math.round(f / nyquist * (bins - 1)), 0, bins - 1);
-      const q = Math.pow(data[k] / 255, .72);
-      const p = y * 4;
-      col.data[p] = 18 + 190 * q;
-      col.data[p + 1] = 3 + 42 * q;
-      col.data[p + 2] = 12 + 54 * q;
-      col.data[p + 3] = 255;
+      const q = Math.pow(data[k] / 255, .72), p = y * 4;
+      px[p] = 18 + 190 * q; px[p + 1] = 3 + 42 * q; px[p + 2] = 12 + 54 * q; px[p + 3] = 255;
     }
     c.putImageData(col, x, 0);
   }
@@ -113,25 +99,20 @@ const live = `  function ensureProcessedAnalyser() {
       if (playing) processedRaf = requestAnimationFrame(tick);
     });
   }
-
-  function stopProcessedLive() {
-    cancelAnimationFrame(processedRaf);
-    processedRaf = 0;
-  }
+  function stopProcessedLive() { cancelAnimationFrame(processedRaf); processedRaf = 0; }
 
   let previewSource = null;
   let previewStopTimer = 0;
-  function startProcessedPreview() {
+  async function startProcessedPreview() {
     clearTimeout(previewStopTimer);
-    if (!buffer || !ctx || !graph || playing) return runProcessedLive();
+    if (!buffer || !ctx) return;
+    if (!graph) { try { await ensureGraph(); } catch (e) { status('Processed Spectrogram 初始化失敗：' + (e.message || e)); return; } }
+    if (playing) return runProcessedLive();
     const analyser = ensureProcessedAnalyser();
     if (!analyser) return;
-
     try { previewSource?.stop(); } catch (_) {}
     try { previewSource?.disconnect(); } catch (_) {}
 
-    // Use only a short real-time window around the cursor. This keeps the preview responsive
-    // while still passing through the exact live EQ / De-noise / Transient graph.
     const sr = buffer.sampleRate;
     const previewSamples = Math.min(buffer.length, Math.max(2048, Math.round(sr * 1.0)));
     const center = Math.round(clamp(offset, 0, Math.max(0, buffer.duration)) * sr);
@@ -141,16 +122,9 @@ const live = `  function ensureProcessedAnalyser() {
       previewBuf.copyToChannel(buffer.getChannelData(ch).subarray(start, start + previewSamples), ch);
     }
 
-    // Reuse the canonical stage graph, but mute the audible master during preview.
-    const src = ctx.createBufferSource();
-    src.buffer = previewBuf;
+    const src = ctx.createBufferSource(); src.buffer = previewBuf;
     let node = src;
-    for (const st of graph.stages) {
-      node.connect(st.dryFull);
-      node.connect(st.eq);
-      node.connect(st.split);
-      node = st.out;
-    }
+    for (const st of graph.stages) { node.connect(st.dryFull); node.connect(st.eq); node.connect(st.split); node = st.out; }
     node.connect(analyser);
     const oldGain = graph.master.gain.value;
     graph.master.gain.setValueAtTime(0, ctx.currentTime);
@@ -173,18 +147,13 @@ const live = `  function ensureProcessedAnalyser() {
     clearTimeout(renderTimer);
     ++renderToken;
     renderTimer = setTimeout(() => {
-      if (!buffer || !ctx || !graph) return;
-      if (playing) {
-        runProcessedLive();
-        return;
-      }
+      if (!buffer || !ctx) return;
       startProcessedPreview();
     }, 35);
   }
 `;
 s = replaceBetween(s, '  function scheduleProcessedRender()', '  function handleFile(file)', live);
 
-// Start the real-time processed view when playback begins, and stop it otherwise.
 const startMarker = "      playing = true; $('play').textContent = '❚❚ 停止';";
 if (!s.includes(startMarker)) throw new Error('play start marker not found');
 s = s.replace(startMarker, startMarker + "\n      runProcessedLive();");
@@ -192,19 +161,12 @@ const stopMarker = "    playing = false; disconnectPlayback(); cancelAnimationFr
 if (!s.includes(stopMarker)) throw new Error('play stop marker not found');
 s = s.replace(stopMarker, stopMarker + "\n    stopProcessedLive();");
 
-// Do not keep reprocessing the static input when the user changes parameters.
 const resizeOld = "  window.addEventListener('resize', () => { drawInputSpectrogram(); if (buffer) scheduleProcessedRender(); });";
-if (s.includes(resizeOld)) {
-  s = s.replace(resizeOld, "  window.addEventListener('resize', () => { drawInputSpectrogram(); if (playing) runProcessedLive(); });");
-}
+if (s.includes(resizeOld)) s = s.replace(resizeOld, "  window.addEventListener('resize', () => { drawInputSpectrogram(); if (playing) runProcessedLive(); });");
 
-// Remove the old offline renderer contract so CI can prove no full-file OfflineAudioContext
-// render is used for the processed display path.
-if (s.includes('new OfflineAudioContext') || s.includes('await c.startRendering()')) {
-  throw new Error('Blocking OfflineAudioContext processed renderer still present');
-}
+if (s.includes('new OfflineAudioContext') || s.includes('await c.startRendering()')) throw new Error('Blocking OfflineAudioContext processed renderer still present');
 for (const marker of ['function ensureProcessedAnalyser', 'function startProcessedPreview', 'function scheduleProcessedRender', 'runProcessedLive();']) {
   if (!s.includes(marker)) throw new Error('live processed renderer marker missing: ' + marker);
 }
 fs.writeFileSync(path, s, 'utf8');
-console.log('Processed Spectrogram now uses realtime analyser + short canonical preview; Input spectrogram remains static.');
+console.log('Processed Spectrogram uses realtime analyser + 1-second canonical preview; Input is static.');
