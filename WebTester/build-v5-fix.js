@@ -63,9 +63,17 @@ s = s.replace(
   "s.split.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);\n      s.eqBand.frequency.setTargetAtTime(b.freq, now, .004);\n      s.eqBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);"
 );
 
-// IMPORTANT: DELTA must not pass through preceding Sections. It is a monitoring
-// function for the selected Section, exactly like Spiff's delta monitoring:
-// original input -> selected Section -> selected Section's wet-dry difference.
+// DELTA is an isolated monitoring mode: it must never include prior Sections.
+// Also remove any previous Section DELTA monitor feed before selecting a new one,
+// otherwise an old DELTA connection can leak into normal playback or a new DELTA.
+const deltaCleanup = `    // Clear all direct DELTA-monitor feeds first.
+    for (const s of graph.stages) {
+      try { s.delta.disconnect(graph.master); } catch (_) {}
+    }
+
+`;
+s = s.replace("    if (deltaBand) {", deltaCleanup + "    if (deltaBand) {", 1);
+
 const oldDelta = `    if (deltaBand) {
       // Feed prior sections normally, then solo only the selected section's true delta.
       let node = source;
@@ -84,9 +92,8 @@ const oldDelta = `    if (deltaBand) {
       return;
     }`;
 const newDelta = `    if (deltaBand) {
-      // DELTA is an isolated monitor of ONE Section.
-      // Never feed it through previous Sections: doing so makes other Sections'
-      // processing part of the monitored difference.
+      // DELTA = ONLY this Section's Wet - Dry change, monitored in isolation.
+      // Start from the original source so Sections 1..N-1 can never leak into it.
       const selected = graph.stages[deltaBand - 1];
       source.connect(selected.dryFull);
       source.connect(selected.eq);
@@ -98,5 +105,6 @@ if (!s.includes(oldDelta)) throw new Error('old DELTA routing block not found');
 s = s.replace(oldDelta, newDelta);
 
 s = s.replace("denoise-processor.js?v=rxgate3", "denoise-processor.js?v=rxgate4");
+
 fs.writeFileSync('/tmp/app-v5.js', s);
 fs.copyFileSync('/tmp/app-v5.js', 'WebTester/app.js');
