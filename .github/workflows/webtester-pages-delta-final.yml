@@ -25,34 +25,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build canonical DELTA app and linearize processors
+      - name: Build canonical DELTA app and finalize De-noise
         run: |
           node WebTester/build-v5-fix.js
-          node WebTester/linearize-denoise.js
+          node WebTester/denoise-reference-fix.js
+          node WebTester/denoise-canonicalize.js
       - name: Validate JavaScript
         run: |
           node --check WebTester/build-v5-fix.js
-          node --check WebTester/linearize-denoise.js
+          node --check WebTester/denoise-reference-fix.js
+          node --check WebTester/denoise-canonicalize.js
           node --check WebTester/app.js
-          node --check WebTester/delta-verify-500-v2.js
-          node --check WebTester/delta-linearity-600.js
+          node --check WebTester/delta-verify-500-v3.js
+          node --check WebTester/denoise-verify-600.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
       - name: Run 500 DELTA verification
-        run: node WebTester/delta-verify-500-v2.js
-      - name: Run 600 linearity verification
-        run: node WebTester/delta-linearity-600.js
-      - name: Validate final DELTA contract
+        run: node WebTester/delta-verify-500-v3.js
+      - name: Run 600 De-noise verification
+        run: node WebTester/denoise-verify-600.js
+      - name: Validate final DELTA and De-noise contract
         run: |
+          grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 4096' WebTester/app.js
+          grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
           grep -q 'deltaBand.connect(deltaDry)' WebTester/app.js
           grep -q 'deltaBand.connect(deltaIdentityWet)' WebTester/app.js
           grep -q 'deltaBand.connect(deltaEQ)' WebTester/app.js
-          grep -q 's.deltaIdentityWet.gain.setTargetAtTime(deltaActive ? 0 : 1' WebTester/app.js
-          grep -q 's.deltaProcessedWet.gain.setTargetAtTime(deltaActive ? 1 : 0' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'const g = 1 + amount * (fullGain - 1);' WebTester/denoise-processor.js
-          grep -q '1 + punch*1.0*transient + sustain*.75*body' WebTester/transient-processor.js
+          grep -q 'this.N = 4096' WebTester/denoise-processor.js
+          grep -q 'this.H = 512' WebTester/denoise-processor.js
+          grep -q 'this.alphaS = 0.90' WebTester/denoise-processor.js
+          grep -q 'this.ddAlpha = 0.98' WebTester/denoise-processor.js
+          grep -q 'smoothGainCepstral' WebTester/denoise-processor.js
+          grep -q 'musicalPostFilter' WebTester/denoise-processor.js
+          grep -q 'this.olaNorm' WebTester/denoise-processor.js
           if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
           if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
           if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
@@ -65,7 +72,7 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's/app.js?v=5/app.js?v=15/g' _site/index.html
+          sed -i 's/app.js?v=5/app.js?v=16/g' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
