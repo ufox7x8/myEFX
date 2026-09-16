@@ -26,14 +26,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build canonical app and apply DELTA zero guard
-        run: |
-          node WebTester/build-v5-fix.js
-          node WebTester/delta-zero-guard.js
+      - name: Build canonical DELTA app
+        run: node WebTester/build-v5-fix.js
       - name: Validate JavaScript
         run: |
           node --check WebTester/build-v5-fix.js
-          node --check WebTester/delta-zero-guard.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify-500-v2.js
           node --check WebTester/denoise-processor.js
@@ -42,12 +39,17 @@ jobs:
         run: node WebTester/delta-verify-500-v2.js
       - name: Validate final DELTA contract
         run: |
-          grep -q 'const deltaActive = !b.bypass && (' WebTester/app.js
-          grep -q 's.deltaMute.gain.setTargetAtTime(deltaActive ? 1 : 0, now, .004);' WebTester/app.js
+          grep -q 'deltaBand.connect(deltaDry)' WebTester/app.js
+          grep -q 'deltaBand.connect(deltaIdentityWet)' WebTester/app.js
+          grep -q 'deltaBand.connect(deltaEQ)' WebTester/app.js
+          grep -q 's.deltaIdentityWet.gain.setTargetAtTime(deltaActive ? 0 : 1' WebTester/app.js
+          grep -q 's.deltaProcessedWet.gain.setTargetAtTime(deltaActive ? 1 : 0' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
           if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
           if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
+          if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
+          if grep -q 'deltaBandLP1' WebTester/app.js; then exit 1; fi
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
@@ -56,7 +58,7 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's/app.js?v=5/app.js?v=13/g' _site/index.html
+          sed -i 's/app.js?v=5/app.js?v=14/g' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
