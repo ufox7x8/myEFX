@@ -31,12 +31,17 @@ jobs:
           node WebTester/denoise-reference-fix.js
           node WebTester/denoise-canonicalize.js
           node WebTester/eq-realtime-patch.js
+          node WebTester/processed-spectrum-fix.js
+          node WebTester/denoise-range-fix.js
       - name: Validate JavaScript
         run: |
           node --check WebTester/build-v5-fix.js
           node --check WebTester/denoise-reference-fix.js
           node --check WebTester/denoise-canonicalize.js
           node --check WebTester/eq-realtime-patch.js
+          node --check WebTester/processed-spectrum-fix.js
+          node --check WebTester/denoise-range-fix.js
+          node --check WebTester/denoise-range-verify-500.js
           node --check WebTester/eq-verify-500.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify-500-v3.js
@@ -45,17 +50,24 @@ jobs:
           node --check WebTester/transient-processor.js
       - name: Run 500 EQ realtime verification
         run: node WebTester/eq-verify-500.js
+      - name: Run 500 De-noise range + Processed Spectrogram verification
+        run: node WebTester/denoise-range-verify-500.js
       - name: Run 500 DELTA verification
         run: node WebTester/delta-verify-500-v3.js
       - name: Run 600 De-noise verification
         run: node WebTester/denoise-verify-600.js
-      - name: Validate final EQ, DELTA and De-noise contract
+      - name: Validate final EQ, DELTA, De-noise and Processed Spectrogram contract
         run: |
           grep -q 's.eq.frequency.setTargetAtTime(freq, now, .0015)' WebTester/app.js
           grep -q 's.eq.Q.setTargetAtTime(q, now, .0015)' WebTester/app.js
           grep -q 's.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .0015)' WebTester/app.js
+          grep -q 'function drawProcessedSpectrogram' WebTester/app.js
+          grep -q 'drawProcessedSpectrogram(out, buffer)' WebTester/app.js
+          grep -q "denoise-processor.js?v=delta16" WebTester/app.js
+          grep -q 'this.clamp(rawAmount / 100, 0.01, 0.99)' WebTester/denoise-processor.js
+          grep -q 'dryL \* (1 - amount) + fullStrengthL\[n\] \* amount' WebTester/denoise-processor.js
+          grep -q 'dryR \* (1 - amount) + fullStrengthR\[n\] \* amount' WebTester/denoise-processor.js
           grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 4096' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
           grep -q 'deltaBand.connect(deltaDry)' WebTester/app.js
           grep -q 'deltaBand.connect(deltaIdentityWet)' WebTester/app.js
           grep -q 'deltaBand.connect(deltaEQ)' WebTester/app.js
@@ -83,7 +95,8 @@ jobs:
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
           sed -i 's/app.js?v=5/app.js?v=16/g' _site/index.html
-          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=3"></head>#' _site/index.html
+          sed -i 's#</body>#<script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
