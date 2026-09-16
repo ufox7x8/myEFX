@@ -50,6 +50,21 @@ page.on('console', msg => { if (msg.type() === 'error') fail('CONSOLE: ' + msg.t
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 
+  const probe = await page.evaluate(async () => {
+    const ctx = new AudioContext();
+    const result = { state: ctx.state, loaded: false, error: '' };
+    try {
+      await ctx.audioWorklet.addModule(new URL('worklet-probe.js', location.href).href);
+      result.loaded = true;
+    } catch (e) {
+      result.error = e?.stack || e?.message || String(e);
+    }
+    try { await ctx.close(); } catch (_) {}
+    return result;
+  });
+  console.log('WORKLET PROBE', JSON.stringify(probe));
+  if (!probe.loaded) fail('probe worklet failed: ' + JSON.stringify(probe));
+
   const stage1 = await page.evaluate(() => {
     const errors = [];
     for (let i = 0; i < 650; i++) {
@@ -169,7 +184,5 @@ try {
   await browser.close(); server.close(); fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-if (failures.length) {
-  console.error('\nFAILURES'); for (const f of failures) console.error(f); process.exit(1);
-}
+if (failures.length) { console.error('\nFAILURES'); for (const f of failures) console.error(f); process.exit(1); }
 console.log('ALL 1900 ITERATIONS PASS');
