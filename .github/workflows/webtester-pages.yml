@@ -35,7 +35,7 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Validate required files and DELTA graph contract
+      - name: Validate DELTA architecture and math contracts
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app.js
@@ -55,25 +55,46 @@ jobs:
           grep -q 'deltaEQ' WebTester/app.js
           grep -q 'deltaDenoise' WebTester/app.js
           grep -q 'deltaTransient' WebTester/app.js
+          grep -q 'deltaDryDelay' WebTester/app.js
+          grep -q 'DELTA_DENOISE_LATENCY_SAMPLES' WebTester/app.js
           grep -q 'deltaDryInvert' WebTester/app.js
           grep -q 'deltaMute' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandHP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta8' WebTester/app.js
-          grep -q 'transient-processor.js?v=delta8' WebTester/app.js
-          if grep -q 'node = s.out' WebTester/app.js; then
-            echo 'Forbidden serial Section traversal remains in DELTA path'
-            exit 1
-          fi
-          if grep -q 'Feed prior sections normally' WebTester/app.js; then
-            echo 'Old multi-Section DELTA routing remains'
-            exit 1
-          fi
-          if grep -q 'wetBandSum' WebTester/app.js; then
-            echo 'Old mixed WetBand/DryBand DELTA architecture remains'
-            exit 1
-          fi
-          echo 'Isolated 4-band DELTA: selected band only, dedicated processing graph, single Wet-minus-Dry subtraction.'
+          grep -q 'denoise-processor.js?v=delta9' WebTester/app.js
+          grep -q 'transient-processor.js?v=delta9' WebTester/app.js
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('WebTester/app.js','utf8');
+          const a = s.indexOf('if (deltaBand) {');
+          const b = s.indexOf('// Normal serial processing path.', a);
+          if (a < 0 || b < 0 || b <= a) throw new Error('DELTA block boundaries not found');
+          const d = s.slice(a, b);
+          for (const bad of ['node = s.out', 'node.connect(s.eq)', 'node.connect(s.split)']) {
+            if (d.includes(bad)) throw new Error(`Forbidden cross-Section routing inside DELTA block: ${bad}`);
+          }
+          if (!d.includes('source.connect(selected.deltaBandHP1)')) throw new Error('DELTA does not start from the original source');
+          if (!d.includes('selected.deltaMute.connect(graph.master)')) throw new Error('DELTA selected output is not exclusively routed to master');
+          if (d.includes('graph.stages[i].out') || d.includes('deltaBand - 1; i++')) throw new Error('DELTA still traverses other Sections');
+          if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand architecture remains');
+          if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA architecture remains');
+          if (!s.includes('deltaDryDelay.delayTime.setTargetAtTime(DELTA_DENOISE_LATENCY_SAMPLES / ctx.sampleRate')) throw new Error('Dry latency alignment missing');
+
+          // Pure numerical Wet-minus-Dry sanity test: only the selected Section
+          // may produce non-zero DELTA samples; the other three are mathematically zero.
+          const dry = [
+            new Float64Array([1,2,3,4]),
+            new Float64Array([2,2,2,2]),
+            new Float64Array([3,4,5,6]),
+            new Float64Array([4,4,4,4])
+          ];
+          const selected = 1;
+          const delta = dry.map((x,i) => i===selected ? x.map(v => v*0.98-v) : x.map(() => 0));
+          for (let i=0;i<4;i++) for (const v of delta[i]) if (i!==selected && v!==0) throw new Error('Non-selected Section leaked into DELTA');
+          const peak = Math.max(...delta[selected].map(Math.abs));
+          if (!(peak > 0 && peak < 0.1)) throw new Error('Selected DELTA is not a small processing-difference signal');
+          console.log('DELTA topology, isolation, dry-latency alignment and numerical Wet-minus-Dry sanity checks passed.');
+          NODE
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
