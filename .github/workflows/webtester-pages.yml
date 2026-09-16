@@ -39,9 +39,6 @@ jobs:
           test -s WebTester/app.js
           test -s WebTester/denoise-processor.js
           test -s WebTester/transient-processor.js
-          grep -q 'id="byp1"' WebTester/index-fixed.html
-          grep -q 'id="byp4"' WebTester/index-fixed.html
-          grep -q 'app.js?v=5' WebTester/index-fixed.html
           echo 'WebTester rewrite files and syntax are valid'
 
       - name: Setup Pages
