@@ -11,14 +11,6 @@ function replaceBetween(text, startMarker, endMarker, replacement) {
   return text.slice(0, a) + replacement + text.slice(b);
 }
 
-// ============================================================================
-// DELTA REWRITE
-// ============================================================================
-// Normal playback graph and DELTA graph are completely independent.
-// Each Section gets its own isolated frequency region, its own processing
-// chain, and its own Wet-minus-Dry subtraction.
-// ============================================================================
-
 const createStage = `  function createStage(c) {
     const eq = c.createBiquadFilter(); eq.type = 'peaking';
     const split = c.createBiquadFilter(); split.type = 'bandpass';
@@ -48,7 +40,7 @@ const createStage = `  function createStage(c) {
     trSum.connect(spectralDelta);
     spectralDelta.connect(out);
 
-    // Dedicated DELTA graph: isolated Section -> dedicated processing -> WET/DRY subtraction.
+    // Completely independent DELTA graph for this Section.
     const deltaBandHP1 = c.createBiquadFilter(); deltaBandHP1.type = 'highpass';
     const deltaBandHP2 = c.createBiquadFilter(); deltaBandHP2.type = 'highpass';
     const deltaBandLP1 = c.createBiquadFilter(); deltaBandLP1.type = 'lowpass';
@@ -73,9 +65,9 @@ const createStage = `  function createStage(c) {
     deltaBandLP1.connect(deltaBandLP2);
     deltaBandLP2.connect(deltaBand);
 
+    // Identical isolated Section signal splits into DRY and dedicated WET processing.
     deltaBand.connect(deltaDry);
     deltaBand.connect(deltaEQ);
-
     deltaEQ.connect(deltaDenoiseIn);
     deltaDenoiseIn.connect(deltaDenoiseSum);
     deltaDenoiseSum.connect(deltaTransientDry);
@@ -84,12 +76,10 @@ const createStage = `  function createStage(c) {
     deltaTransientWet.connect(deltaTransientSum);
     deltaTransientSum.connect(deltaWet);
 
-    // Align the dry reference to the known 1024-sample De-noise analysis latency.
     deltaDry.connect(deltaDryDelay);
     deltaDryDelay.connect(deltaDryInvert);
     deltaWet.connect(deltaOut);
     deltaDryInvert.connect(deltaOut);
-
     deltaOut.connect(deltaMute);
     deltaMute.gain.value = 0;
 
@@ -109,12 +99,10 @@ const createStage = `  function createStage(c) {
 
 s = replaceBetween(s, '  function createStage(c) {', '\n\n  async function ensureGraph()', createStage);
 
-// This declaration MUST be inserted into the generated app.js itself.
-const latencyDecl = "  const DELTA_DENOISE_LATENCY_SAMPLES = 1024;";
 if (!s.includes('DELTA_DENOISE_LATENCY_SAMPLES = 1024')) {
   const anchor = "  let slot = 'A', slotA = cloneData(DEFAULTS), slotB = cloneData(DEFAULTS);";
-  if (!s.includes(anchor)) throw new Error('app state anchor not found for latency declaration');
-  s = s.replace(anchor, anchor + '\n' + latencyDecl);
+  if (!s.includes(anchor)) throw new Error('app state anchor not found');
+  s = s.replace(anchor, anchor + '\n  const DELTA_DENOISE_LATENCY_SAMPLES = 1024;');
 }
 
 const ensureOld = `    for (const s of graph.stages) {
@@ -154,9 +142,7 @@ const syncGraph = `  function syncGraph() {
     if (!graph || !ctx) return;
     const now = ctx.currentTime;
     const data = currentData();
-
-    const ordered = data.map((b, i) => ({ i, f: Math.max(20, Number(b.freq)) }))
-      .sort((a, b) => a.f - b.f);
+    const ordered = data.map((b, i) => ({ i, f: Math.max(20, Number(b.freq)) })).sort((a, b) => a.f - b.f);
     const lowEdge = 20;
     const highEdge = Math.max(1000, ctx.sampleRate * 0.46);
     const boundaries = new Map();
@@ -205,7 +191,11 @@ const syncGraph = `  function syncGraph() {
       s.deltaTransientWet.gain.setTargetAtTime(b.bypass ? 0 : mix, now, .004);
       s.deltaTransient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.deltaTransient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
-      s.deltaDryDelay.delayTime.setTargetAtTime(DELTA_DENOISE_LATENCY_SAMPLES / ctx.sampleRate, now, .004);
+
+      // Den­oise processor is true sample-for-sample bypass at 0%, so latency compensation is dynamic.
+      const denoiseActive = !b.bypass && Number(b.denoise) > 0;
+      const latencySamples = denoiseActive ? DELTA_DENOISE_LATENCY_SAMPLES : 0;
+      s.deltaDryDelay.delayTime.setTargetAtTime(latencySamples / ctx.sampleRate, now, .004);
       s.deltaMute.gain.setTargetAtTime(b.bypass ? 0 : 1, now, .004);
     });
   }`;
@@ -217,19 +207,14 @@ const playback = `  function connectPlayback() {
     const ls = loopEnd > loopStart ? loopStart : 0;
     const le = loopEnd > loopStart ? loopEnd : buffer.duration;
     source.loop = loop; source.loopStart = ls; source.loopEnd = le;
-
     if (bypassAll) { source.connect(ctx.destination); return; }
-
     if (deltaBand) {
-      for (const stage of graph.stages) {
-        try { stage.deltaMute.disconnect(graph.master); } catch (_) {}
-      }
+      for (const stage of graph.stages) { try { stage.deltaMute.disconnect(graph.master); } catch (_) {} }
       const selected = graph.stages[deltaBand - 1];
       source.connect(selected.deltaBandHP1);
       selected.deltaMute.connect(graph.master);
       return;
     }
-
     let node = source;
     for (const s of graph.stages) {
       node.connect(s.dryFull);
@@ -241,21 +226,15 @@ const playback = `  function connectPlayback() {
   }`;
 s = replaceBetween(s, '  function connectPlayback() {', '\n\n  function restartAtCurrentPosition()', playback);
 
-s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta9');
-s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta9');
+s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta10');
+s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta10');
 
-const markers = [
-  'deltaBandHP1', 'deltaBandHP2', 'deltaBandLP1', 'deltaBandLP2',
-  'deltaEQ', 'deltaDenoise', 'deltaTransient', 'deltaDryDelay',
-  'DELTA_DENOISE_LATENCY_SAMPLES = 1024', 'deltaDryInvert', 'deltaMute',
-  'source.connect(selected.deltaBandHP1)', 'selected.deltaMute.connect(graph.master)'
-];
-for (const marker of markers) {
+for (const marker of ['deltaBandHP1','deltaBandHP2','deltaBandLP1','deltaBandLP2','deltaEQ','deltaDenoise','deltaTransient','deltaDryDelay','DELTA_DENOISE_LATENCY_SAMPLES = 1024','deltaDryInvert','deltaMute','source.connect(selected.deltaBandHP1)','selected.deltaMute.connect(graph.master)']) {
   if (!s.includes(marker)) throw new Error(`Missing DELTA marker: ${marker}`);
 }
 if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA description remains');
 if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand DELTA remains');
 
-fs.writeFileSync('/tmp/app-v9.js', s, 'utf8');
-fs.copyFileSync('/tmp/app-v9.js', 'WebTester/app.js');
-console.log('Generated DELTA v9: isolated 4-band solo -> dedicated processing -> latency-aligned Wet-minus-Dry.');
+fs.writeFileSync('/tmp/app-v10.js', s, 'utf8');
+fs.copyFileSync('/tmp/app-v10.js', 'WebTester/app.js');
+console.log('Generated DELTA v10: isolated 4-band solo -> dedicated processing -> dynamic latency-aligned Wet-minus-Dry.');
