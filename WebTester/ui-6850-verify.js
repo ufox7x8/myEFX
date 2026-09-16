@@ -7,6 +7,12 @@ for(const x of must) expect(html.includes(x),`missing UI marker: ${x}`);
 expect(html.includes('grid-template-columns:repeat(4,minmax(0,1fr))'),'four-section previous deck missing');
 expect(!html.includes('METAL SPECTRAL PROCESSOR'),'new metal UI must not be loaded by restored interface');
 expect(!html.includes('PARAMETRIC'),'new metal deck marker must not be present');
+expect(app.includes('function ensureProcessedAnalyser'),'realtime processed analyser missing');
+expect(app.includes('function startProcessedPreview'),'short canonical preview missing');
+expect(app.includes('function scheduleProcessedRender'),'processed scheduler missing');
+expect(app.includes('runProcessedLive();'),'live processed refresh hook missing');
+expect(!app.includes('new OfflineAudioContext'),'processed display must not use blocking OfflineAudioContext');
+expect(!app.includes('await c.startRendering()'),'processed display must not block on full-file rendering');
 expect(app.includes('s.eq.frequency.setTargetAtTime(freq, now, .0015)'),'canonical post-build EQ smoothing missing');
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function quant(v,min,max,step){v=clamp(v,min,max);return Number((Math.round(v/step)*step).toFixed(String(step).includes('.')?String(step).split('.')[1].length:0))}
@@ -23,4 +29,4 @@ for(let run=1;run<=6850;run++){
  expect(Math.abs(wet-expected)<Number.EPSILON*32,`run ${run}: exact linear interpolation`);
  const d=(t*.996)+.002; const d2=clamp(d,0,1); expect(d2>=0&&d2<=1,`run ${run}: normalized control`);
 }
-console.log(`PASS 6850/6850 full restored UI + parameter regressions; checks=${checks}`);
+console.log(`PASS 6850/6850 realtime processed UI + parameter regressions; checks=${checks}`);
