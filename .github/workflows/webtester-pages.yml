@@ -18,10 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,6 +29,25 @@ jobs:
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
+          node --check WebTester/self-test.mjs
+
+      - name: Install browser test runtime
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run 1900 browser regression checks
+        run: node WebTester/self-test.mjs
+
+  deploy:
+    needs: test
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Validate required files
         run: |
@@ -39,7 +55,7 @@ jobs:
           test -s WebTester/app.js
           test -s WebTester/denoise-processor.js
           test -s WebTester/transient-processor.js
-          echo 'WebTester rewrite files and syntax are valid'
+          test -s WebTester/self-test.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
