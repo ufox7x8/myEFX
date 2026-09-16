@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">
+<defs>
+ <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#53565b"/><stop offset=".18" stop-color="#181a1d"/><stop offset=".5" stop-color="#34373b"/><stop offset=".82" stop-color="#111316"/><stop offset="1" stop-color="#4b4e53"/></linearGradient>
+ <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".55" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .12"/></feComponentTransfer><feBlend in="SourceGraphic" mode="multiply"/></filter>
+ <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#d9dce0" stop-opacity=".22"/><stop offset=".5" stop-color="#000" stop-opacity=".4"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient>
+</defs>
+<rect width="1200" height="400" rx="18" fill="url(#g)" filter="url(#grain)"/>
+<rect x="2" y="2" width="1196" height="396" rx="16" fill="none" stroke="url(#edge)" stroke-width="4"/>
+<g opacity=".15" stroke="#f0f1f2" stroke-width="1"><path d="M0 70h1200M0 140h1200M0 210h1200M0 280h1200M0 350h1200"/></g>
+</svg>
