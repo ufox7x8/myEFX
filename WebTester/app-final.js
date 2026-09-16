@@ -2,9 +2,16 @@
   'use strict';
 
   const N = 4;
-  const DEFAULTS = [31.5, 125, 1000, 8000].map(freq => ({ freq, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false }));
-  const LIMITS = {
-    freq: [20, 20000, 0.1], gain: [-24, 24, 0.1], q: [0.1, 20, 0.01],
+  const FREQ_RANGES = [
+    [20, 300, 0.1],
+    [60, 1200, 0.1],
+    [200, 3000, 0.1],
+    [1000, 25000, 0.1]
+  ];
+  const DEFAULT_FREQ = [31.5, 125, 1000, 8000];
+  const DEFAULTS = DEFAULT_FREQ.map(freq => ({ freq, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false, solo: false }));
+  const COMMON_LIMITS = {
+    gain: [-24, 24, 0.1], q: [0.1, 20, 0.01],
     denoise: [0, 100, 1], punch: [-100, 100, 1], sustain: [-100, 100, 1]
   };
   const $ = id => document.getElementById(id);
@@ -17,13 +24,18 @@
   let ab = 'A', slotA = clone(DEFAULTS), slotB = clone(DEFAULTS);
   let drag = null, renderTimer = 0, graphMode = '';
 
+  function freqLimit(i) { return FREQ_RANGES[i - 1] || FREQ_RANGES[0]; }
+  function limitFor(key, i) { return key === 'freq' ? freqLimit(i) : COMMON_LIMITS[key]; }
   function status(s) { if ($('status')) $('status').textContent = s; }
+
   function data() {
     return Array.from({ length: N }, (_, i) => {
       const k = i + 1;
-      return { freq: +$('freq' + k).value, gain: +$('gain' + k).value, q: +$('q' + k).value,
+      return {
+        freq: +$('freq' + k).value, gain: +$('gain' + k).value, q: +$('q' + k).value,
         denoise: +$('denoise' + k).value, punch: +$('punch' + k).value, sustain: +$('sustain' + k).value,
-        bypass: !$('byp' + k).classList.contains('on') };
+        bypass: !$('byp' + k).classList.contains('on'), solo: $('solo' + k).classList.contains('active')
+      };
     });
   }
   function saveSlot() { if (ab === 'A') slotA = data(); else slotB = data(); }
@@ -34,60 +46,69 @@
     return Math.round(v) + '%';
   }
   function drawKnob(input, show = false) {
-    const key = input.id.replace(/\d+$/, ''), [min, max] = LIMITS[key], v = +input.value;
+    const key = input.id.replace(/\d+$/, ''), i = +(input.id.match(/\d+$/)?.[0] || 1), [min, max] = limitFor(key, i), v = +input.value;
     const knob = document.querySelector(`.knob[data-target="${input.id}"]`); if (!knob) return;
     const p = knob.querySelector('.knob-pointer'); if (p) p.style.transform = `translateX(-50%) rotate(${-135 + 270 * (v - min) / (max - min)}deg)`;
     const r = $(input.id + 'Out'); if (r) { r.textContent = fmt(key, v); r.classList.toggle('show', show); }
   }
+  function normalizeValue(key, i, value) {
+    const [min, max, step] = limitFor(key, i), d = (String(step).split('.')[1] || '').length;
+    return Number((Math.round(clamp(Number(value), min, max) / step) * step).toFixed(d));
+  }
   function setKnob(input, value, show = true) {
-    const key = input.id.replace(/\d+$/, ''), [min, max, step] = LIMITS[key];
-    const d = (String(step).split('.')[1] || '').length;
-    input.value = clamp(Math.round(clamp(+value, min, max) / step) * step, min, max).toFixed(d);
-    drawKnob(input, show); input.dispatchEvent(new Event('input', { bubbles: true }));
+    const key = input.id.replace(/\d+$/, ''), i = +(input.id.match(/\d+$/)?.[0] || 1);
+    input.value = String(normalizeValue(key, i, value)); drawKnob(input, show); input.dispatchEvent(new Event('input', { bubbles: true }));
   }
   function setBypass(i, on, update = true) {
-    const b = $('byp' + i); b.classList.toggle('on', on); b.classList.toggle('off', !on);
+    const b = $('byp' + i); if (!b) return;
+    b.classList.toggle('on', on); b.classList.toggle('off', !on);
     const st = document.querySelector(`.band[data-band="${i}"] .state`); if (st) st.textContent = on ? 'ON' : 'BYP';
     if (update) { saveSlot(); sync(); renderProcessedSoon(); }
+  }
+  function setSolo(i, active, update = true) {
+    const b = $('solo' + i); if (!b) return;
+    b.classList.toggle('active', active); b.textContent = active ? 'SOLO ON' : 'SOLO';
+    if (update) {
+      saveSlot(); sync(); renderProcessedSoon();
+      const solos = data().map((x, n) => x.solo ? n + 1 : 0).filter(Boolean);
+      status(solos.length ? `SOLO：SECTION ${solos.join('、')}` : 'SOLO 已關閉');
+    }
   }
   function apply(a, save = false) {
     for (let i = 1; i <= N; i++) {
       const b = a[i - 1] || DEFAULTS[i - 1];
-      for (const key of Object.keys(LIMITS)) {
-        const input = $(key + i); input.value = String(clamp(+b[key], LIMITS[key][0], LIMITS[key][1])); drawKnob(input, false);
+      for (const key of ['freq', 'gain', 'q', 'denoise', 'punch', 'sustain']) {
+        const input = $(key + i); if (!input) continue;
+        input.value = String(normalizeValue(key, i, b[key])); drawKnob(input, false);
       }
-      setBypass(i, !b.bypass, false);
+      setBypass(i, !b.bypass, false); setSolo(i, !!b.solo, false);
     }
     if (save) saveSlot(); sync(); renderProcessedSoon();
   }
-
   function resetAll() {
     delta = 0; allBypass = false; $('bypassAll').classList.remove('active'); $('bypassAll').textContent = 'BYPASS OFF';
     apply(clone(DEFAULTS), true); updateDelta(); status('所有 Sections 已重設。');
   }
+  function resetBands() { apply(clone(DEFAULTS), true); delta = 0; updateDelta(); status('所有 Sections 已重設。'); }
   function resetBand(i) { const a = data(); a[i - 1] = { ...DEFAULTS[i - 1] }; apply(a, true); status('SECTION ' + i + ' 已重設。'); }
   function sortBands() { apply(data().sort((a, b) => a.freq - b.freq), true); status('Sections 已依頻率排序。'); }
-
   function ensureCtx() { if (!ctx || ctx.state === 'closed') ctx = new AudioContext(); return ctx; }
 
   // 固定串接：source -> dryBus；source -> Section BandPass -> (dry | EQ -> dynamic processor) -> Wet-Dry changeBus.
-  // 正常：原始完整訊號 + 每段 change。DELTA：僅指定 Section change。其他 Section 永遠不進 DELTA。
+  // 正常：原始完整訊號 + 每段 change。DELTA：僅指定 Section change。SOLO 只放行被 Solo 的 Section change。
   function makeStage() {
     const c = ensureCtx();
     const band = c.createBiquadFilter(); band.type = 'bandpass';
     const eq = c.createBiquadFilter(); eq.type = 'peaking';
-    const dry = c.createGain();
-    const neg = c.createGain(); neg.gain.value = -1;
-    const change = c.createGain();
-    const normal = c.createGain(); const deltaGate = c.createGain();
+    const dry = c.createGain(); const neg = c.createGain(); neg.gain.value = -1;
+    const change = c.createGain(); const normal = c.createGain(); const deltaGate = c.createGain();
     const proc = c.createScriptProcessor(512, 2, 2);
     const state = { dFast: 0, dSlow: 0, dNoise: 1e-5, dGain: 1, dOpen: true, tFast: 0, tSlow: 0, settings: DEFAULTS[0] };
 
     proc.onaudioprocess = e => {
       const inp = e.inputBuffer, out = e.outputBuffer, s = state, b = s.settings || DEFAULTS[0];
       const frames = out.length, ch = Math.min(inp.numberOfChannels, out.numberOfChannels);
-      const amount = clamp(+b.denoise || 0, 0, 100) / 100;
-      const punch = (+b.punch || 0) / 100, sustain = (+b.sustain || 0) / 100;
+      const amount = clamp(+b.denoise || 0, 0, 100) / 100, punch = (+b.punch || 0) / 100, sustain = (+b.sustain || 0) / 100;
       for (let i = 0; i < frames; i++) {
         let peak = 0;
         for (let c = 0; c < ch; c++) peak = Math.max(peak, Math.abs(inp.getChannelData(c)[i]));
@@ -101,10 +122,8 @@
           const lo = Math.log10(closeT), hi = Math.log10(openT), x = Math.log10(Math.max(snr, 1e-6));
           let p = clamp((x - lo) / (hi - lo), 0, 1); p = p * p * (3 - 2 * p); if (!s.dOpen) p *= 0.35;
           const red = 18 * amount * (1 - p), target = Math.pow(10, -red / 20);
-          s.dGain += (target - s.dGain) * (target < s.dGain ? 0.28 : 0.065); s.dGain = clamp(s.dGain, Math.pow(10, -18 * amount / 20), 1);
-          dg = s.dGain;
-        } else { dg = 1; }
-
+          s.dGain += (target - s.dGain) * (target < s.dGain ? 0.28 : 0.065); s.dGain = clamp(s.dGain, Math.pow(10, -18 * amount / 20), 1); dg = s.dGain;
+        }
         let tg = 1;
         if (Math.abs(punch) > 0.0001 || Math.abs(sustain) > 0.0001) {
           const smp = peak * dg; s.tFast += (smp - s.tFast) * 0.28; s.tSlow += (smp - s.tSlow) * 0.018;
@@ -139,12 +158,12 @@
 
   function sync() {
     if (!graph || !ctx) return;
-    const now = ctx.currentTime, a = data();
+    const now = ctx.currentTime, a = data(), anySolo = a.some(b => b.solo);
     graph.stages.forEach((s, i) => {
       const b = a[i]; s.state.settings = b;
       s.band.frequency.setTargetAtTime(b.freq, now, 0.003); s.band.Q.setTargetAtTime(clamp(b.q, 0.25, 18), now, 0.003);
       s.eq.frequency.setTargetAtTime(b.freq, now, 0.003); s.eq.Q.setTargetAtTime(clamp(b.q, 0.25, 18), now, 0.003); s.eq.gain.setTargetAtTime(b.gain, now, 0.003);
-      const active = !allBypass && !b.bypass;
+      const active = !allBypass && !b.bypass && (!anySolo || b.solo);
       s.normal.gain.setTargetAtTime(active && !delta ? 1 : 0, now, 0.003);
       s.deltaGate.gain.setTargetAtTime(active && delta === i + 1 ? 1 : 0, now, 0.003);
     });
@@ -184,43 +203,125 @@
 
   function fft(re, im) {
     for (let i = 1, j = 0; i < re.length; i++) { let bit = re.length >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
-    for (let len = 2; len <= re.length; len <<= 1) { const a = -2 * Math.PI / len, c = Math.cos(a), s = Math.sin(a); for (let i = 0; i < re.length; i += len) { let wr = 1, wi = 0; for (let j = 0; j < len / 2; j++) { const x = i + j, y = x + len / 2, vr = re[y] * wr - im[y] * wi, vi = re[y] * wi + im[y] * wr; re[y] = re[x] - vr; im[y] = im[x] - vi; re[x] += vr; im[x] += vi; const nr = wr * c - wi * s; wi = wr * s + wi * c; wr = nr; } } }
+    for (let len = 2; len <= re.length; len <<= 1) {
+      const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (let i = 0; i < re.length; i += len) {
+        let ur = 1, ui = 0;
+        for (let j = 0; j < len / 2; j++) {
+          const p = i + j, q = p + len / 2, tr = re[q] * ur - im[q] * ui, ti = re[q] * ui + im[q] * ur;
+          re[q] = re[p] - tr; im[q] = im[p] - ti; re[p] += tr; im[p] += ti;
+          const nr = ur * wr - ui * wi; ui = ur * wi + ui * wr; ur = nr;
+        }
+      }
+    }
   }
-  function strength(hz) {
-    let z = 0; for (const b of data()) { if (b.bypass) continue; const o = Math.log2(Math.max(20, hz) / Math.max(20, b.freq)), w = 0.35 + 2 / Math.max(0.25, b.q), g = Math.exp(-Math.pow(o / w, 2)); z += Math.abs(Math.pow(10, b.gain / 20) - 1) * g + 0.8 * b.denoise / 100 * g + 0.55 * (Math.abs(b.punch) + Math.abs(b.sustain)) / 200 * g; } return clamp(z, 0, 1);
+  function drawSpectrogram(canvas, audioBuffer, processed = false) {
+    if (!canvas || !audioBuffer) return;
+    const w = Math.max(1, Math.floor(canvas.clientWidth || 1200)), h = Math.max(1, Math.floor(canvas.clientHeight || 220)), dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.floor(w * dpr); canvas.height = Math.floor(h * dpr);
+    const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = '#02070a'; g.fillRect(0, 0, w, h);
+    const ch0 = audioBuffer.getChannelData(0), bins = 256, fftN = 512, cols = Math.min(w, 900), hop = Math.max(1, Math.floor((ch0.length - fftN) / Math.max(1, cols - 1)));
+    for (let x = 0; x < cols; x++) {
+      const start = Math.min(ch0.length - fftN, x * hop), re = new Float64Array(fftN), im = new Float64Array(fftN);
+      for (let i = 0; i < fftN; i++) re[i] = ch0[start + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (fftN - 1)));
+      fft(re, im);
+      for (let y = 0; y < bins; y++) {
+        const k = Math.min(fftN / 2 - 1, Math.floor(y * (fftN / 2) / bins)), mag = Math.hypot(re[k], im[k]) / fftN;
+        const db = 20 * Math.log10(Math.max(mag, 1e-6)); let norm = clamp((db + 85) / 75, 0, 1);
+        if (processed) {
+          const hz = k * audioBuffer.sampleRate / fftN, bs = data();
+          const affected = bs.some((b, idx) => {
+            const range = freqLimit(idx + 1), inRange = hz >= range[0] * 0.45 && hz <= range[1] * 1.8, dist = Math.abs(Math.log2(Math.max(hz, 1) / Math.max(b.freq, 1)));
+            const change = Math.abs(b.gain) / 12 + b.denoise / 100 + Math.max(Math.abs(b.punch), Math.abs(b.sustain)) / 100;
+            return inRange && dist < 1.2 && change > 0.05 && !b.bypass && (!bs.some(x => x.solo) || b.solo);
+          });
+          if (!affected) norm = 0;
+        }
+        if (norm > 0.001) { const hue = 190 + norm * 130; g.fillStyle = `hsl(${hue} 85% ${18 + norm * 42}%)`; g.fillRect(x * w / cols, h - 1 - y * h / bins, Math.ceil(w / cols) + 1, Math.ceil(h / bins) + 1); }
+      }
+    }
   }
-  function spectro(canvas, processed, h) {
-    if (!buffer || !canvas) return; const w = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio)), hh = Math.max(1, Math.floor((h || canvas.clientHeight) * devicePixelRatio)); canvas.width = w; canvas.height = hh;
-    const g = canvas.getContext('2d'); g.fillStyle = '#02070a'; g.fillRect(0, 0, w, hh); const x = buffer.getChannelData(0), M = 1024, bins = M / 2, cols = Math.min(700, w), hop = Math.max(1, Math.floor(x.length / Math.max(1, cols - 1))), re = new Float64Array(M), im = new Float64Array(M);
-    for (let col = 0; col < cols; col++) { const start = Math.min(col * hop, Math.max(0, x.length - M)); for (let n = 0; n < M; n++) { re[n] = x[start + n] * (0.5 - 0.5 * Math.cos(2 * Math.PI * n / (M - 1))); im[n] = 0; } fft(re, im); for (let y = 0; y < hh; y++) { const k = clamp(Math.floor((1 - y / hh) * bins), 1, bins - 1), hz = k * buffer.sampleRate / M, db = 20 * Math.log10(Math.hypot(re[k], im[k]) / M + 1e-9), st = processed ? strength(hz) : 1; if (processed && st < 0.003) continue; const a = clamp((db + 90) / 75, 0, 1) * st; if (a < 0.004) continue; const q = Math.round(a * 255); g.fillStyle = `rgb(${q},${Math.min(255,q+25)},${Math.min(255,q+45)})`; g.fillRect(Math.floor(col * w / cols), y, Math.ceil(w / cols) + 1, 1); } }
-  }
-  function renderProcessedSoon() { if (!buffer) return; clearTimeout(renderTimer); renderTimer = setTimeout(() => spectro($('specOut'), true, 205), 60); }
-  function clearRange() { $('rangeIn')?.classList.remove('show'); $('rangeOut')?.classList.remove('show'); }
-  function selectRange(which, a, b) { const el = $(which === 'in' ? 'rangeIn' : 'rangeOut'); if (!el) return; el.style.left = a * 100 + '%'; el.style.width = (b - a) * 100 + '%'; el.classList.add('show'); }
-  function bindRange(which) {
-    const f = $(which === 'in' ? 'inputFrame' : 'outputFrame'); if (!f) return;
-    f.addEventListener('pointerdown', e => { if (e.button !== 0 || !buffer || e.target.closest('.drop-card')) return; const r = f.getBoundingClientRect(); drag = { which, a: clamp((e.clientX - r.left) / r.width, 0, 1) }; f.setPointerCapture?.(e.pointerId); });
-    f.addEventListener('pointermove', e => { if (!drag || drag.which !== which) return; const r = f.getBoundingClientRect(), x = clamp((e.clientX - r.left) / r.width, 0, 1); selectRange(which, Math.min(drag.a, x), Math.max(drag.a, x)); });
-    f.addEventListener('pointerup', e => { if (!drag || drag.which !== which) return; const r = f.getBoundingClientRect(), x = clamp((e.clientX - r.left) / r.width, 0, 1), a = Math.min(drag.a, x), b = Math.max(drag.a, x); drag = null; if (b - a < 0.01) return; loop = true; loopStart = a * buffer.duration; loopEnd = b * buffer.duration; offset = loopStart; selectRange('in', a, b); selectRange('out', a, b); $('loop').textContent = `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s`; $('loop').classList.add('active'); if (playing) { stop(); start(); } status(`LOOP 範圍 ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)} s`); });
-    f.addEventListener('dblclick', e => { e.preventDefault(); loop = false; loopStart = loopEnd = offset = 0; clearRange(); $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); status('已清除 LOOP 範圍'); if (playing) { stop(); start(); } });
-  }
+  function renderProcessed() { if (buffer) drawSpectrogram($('specOut'), buffer, true); }
+  function renderProcessedSoon() { clearTimeout(renderTimer); renderTimer = setTimeout(renderProcessed, 80); }
+
   async function loadFile(file) {
-    if (!file) return; try { stop(); const c = ensureCtx(); buffer = await c.decodeAudioData(await file.arrayBuffer()); offset = loopStart = loopEnd = 0; loop = false; delta = 0; allBypass = false; $('dropUi').style.display = 'none'; $('fileInfo').textContent = `${file.name} · ${buffer.sampleRate} Hz · ${buffer.numberOfChannels} ch · ${buffer.duration.toFixed(2)} s`; $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); clearRange(); cursor(0); spectro($('specIn'), false, 260); renderProcessedSoon(); updateDelta(); status('音檔已載入。'); } catch (e) { buffer = null; $('dropUi').style.display = ''; status('音檔載入失敗：' + (e?.message || e)); }
+    if (!file) return;
+    try {
+      stop(); status('載入音檔中……'); const c = ensureCtx(), bytes = await file.arrayBuffer(), decoded = await c.decodeAudioData(bytes.slice(0));
+      buffer = decoded; offset = 0; loopStart = 0; loopEnd = 0; loop = false;
+      $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); $('dropUi').style.display = 'none';
+      $('fileInfo').textContent = `${file.name} · ${decoded.duration.toFixed(2)} s · ${decoded.sampleRate} Hz`;
+      drawSpectrogram($('specIn'), buffer, false); renderProcessed(); cursor(0); status('音檔已載入。');
+    } catch (e) { status('音檔載入失敗：' + (e?.message || e)); console.error(e); }
   }
-  function updateDelta() { document.querySelectorAll('[data-action="delta"]').forEach((b, i) => { const on = delta === i + 1; b.classList.toggle('active', on); b.textContent = on ? 'DELTA ON' : 'DELTA'; }); if (delta) allBypass = false; sync(); }
-  function toggleBypassAll() { allBypass = !allBypass; if (allBypass) delta = 0; $('bypassAll').classList.toggle('active', allBypass); $('bypassAll').textContent = allBypass ? 'BYPASS ON' : 'BYPASS OFF'; updateDelta(); }
-  function toggleLoop() { loop = !loop; if (loop && buffer && loopEnd <= loopStart) { loopStart = 0; loopEnd = buffer.duration; selectRange('in', 0, 1); selectRange('out', 0, 1); } if (!loop) { loopStart = loopEnd = 0; clearRange(); } $('loop').textContent = loop ? `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s` : 'LOOP OFF'; $('loop').classList.toggle('active', loop); if (playing) { stop(); start(); } }
-  function toggleAB() { saveSlot(); ab = ab === 'A' ? 'B' : 'A'; apply(ab === 'A' ? slotA : slotB, false); $('ab').textContent = 'A/B · ' + ab; status('已切換到 Slot ' + ab); }
-  function setup() {
-    document.querySelectorAll('.knob-input').forEach(inp => { inp.addEventListener('input', () => { drawKnob(inp, true); saveSlot(); sync(); renderProcessedSoon(); }); inp.addEventListener('change', () => drawKnob(inp, false)); drawKnob(inp, false); });
-    document.querySelectorAll('.knob').forEach(k => { const inp = $(k.dataset.target); let y = 0; k.addEventListener('pointerenter', () => drawKnob(inp, true)); k.addEventListener('pointerleave', () => drawKnob(inp, false)); k.addEventListener('pointerdown', e => { e.preventDefault(); y = e.clientY; k.setPointerCapture?.(e.pointerId); k.classList.add('active'); }); k.addEventListener('pointermove', e => { if (!k.hasPointerCapture?.(e.pointerId)) return; const key = inp.id.replace(/\d+$/, ''); setKnob(inp, +inp.value + (y - e.clientY) * ((LIMITS[key][1] - LIMITS[key][0]) / 240)); y = e.clientY; }); k.addEventListener('pointerup', () => { k.classList.remove('active'); drawKnob(inp, false); }); k.addEventListener('wheel', e => { e.preventDefault(); const key = inp.id.replace(/\d+$/, ''); setKnob(inp, +inp.value + (e.deltaY < 0 ? 1 : -1) * ((LIMITS[key][1] - LIMITS[key][0]) / 240) * 6); }, { passive: false }); k.addEventListener('dblclick', () => setKnob(inp, +inp.defaultValue)); });
-    $('file').addEventListener('change', e => loadFile(e.target.files?.[0])); $('dropUi').addEventListener('dragover', e => e.preventDefault()); $('dropUi').addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer?.files?.[0]); }); $('inputFrame').addEventListener('dragover', e => e.preventDefault()); $('inputFrame').addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer?.files?.[0]); });
-    $('play').addEventListener('click', togglePlay); $('stop').addEventListener('click', stop); $('loop').addEventListener('click', toggleLoop); $('bypassAll').addEventListener('click', toggleBypassAll); $('ab').addEventListener('click', toggleAB); $('sortBtn').addEventListener('click', sortBands); $('resetAll').addEventListener('click', resetAll); $('resetBands').addEventListener('click', resetAll);
-    document.querySelectorAll('.band').forEach(card => { const i = +card.dataset.band; card.querySelector('[data-action="bypass"]').addEventListener('click', () => setBypass(i, !$('byp' + i).classList.contains('on'))); card.querySelector('[data-action="delta"]').addEventListener('click', () => { delta = delta === i ? 0 : i; updateDelta(); status(delta ? `DELTA SECTION ${delta}：只聽 Wet−Dry` : 'DELTA OFF'); }); card.querySelector('[data-action="reset"]').addEventListener('click', () => resetBand(i)); });
-    bindRange('in'); bindRange('out'); window.addEventListener('keydown', e => { if (e.code !== 'Space' || e.repeat) return; const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; e.preventDefault(); togglePlay(); }); window.addEventListener('resize', () => { if (buffer) { spectro($('specIn'), false, 260); renderProcessedSoon(); } });
+  function updateRange(rangeEl, start, end) {
+    if (!rangeEl || !(end > start) || !buffer) { rangeEl?.classList.remove('show'); return; }
+    rangeEl.style.left = start / buffer.duration * 100 + '%'; rangeEl.style.width = (end - start) / buffer.duration * 100 + '%'; rangeEl.classList.add('show');
   }
-  function rms() { if (!graph) return 0; const d = new Float32Array(graph.analyser.fftSize); graph.analyser.getFloatTimeDomainData(d); let s = 0; for (const x of d) s += x * x; return Math.sqrt(s / d.length); }
-  function debug() { return { loaded: !!buffer, playing, loop, loopStart, loopEnd, delta, allBypass, graphReady: !!graph, graphMode, audioState: ctx?.state || 'none', bands: data() }; }
-  window.myEFX = { loadFile, togglePlay, stopPlayback: stop, currentData: data, debugState: debug, meterRms: rms };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup, { once: true }); else setup();
+  function bindRange(id, rangeId) {
+    const frame = $(id), rangeEl = $(rangeId); if (!frame) return;
+    frame.addEventListener('pointerdown', e => { if (!buffer) return; const r = frame.getBoundingClientRect(), p = clamp((e.clientX - r.left) / r.width, 0, 1); drag = { frame, start: p }; frame.setPointerCapture?.(e.pointerId); });
+    frame.addEventListener('pointermove', e => { if (!drag || drag.frame !== frame || !buffer) return; const r = frame.getBoundingClientRect(), p = clamp((e.clientX - r.left) / r.width, 0, 1), a = Math.min(drag.start, p) * buffer.duration, b = Math.max(drag.start, p) * buffer.duration; updateRange(rangeEl, a, b); });
+    frame.addEventListener('pointerup', e => {
+      if (!drag || drag.frame !== frame || !buffer) return;
+      const r = frame.getBoundingClientRect(), p = clamp((e.clientX - r.left) / r.width, 0, 1), a = Math.min(drag.start, p) * buffer.duration, b = Math.max(drag.start, p) * buffer.duration; drag = null;
+      if (b - a >= 0.02) { loopStart = a; loopEnd = b; loop = true; $('loop').textContent = 'LOOP ON'; $('loop').classList.add('active'); updateRange($('rangeIn'), loopStart, loopEnd); updateRange($('rangeOut'), loopStart, loopEnd); status(`LOOP ${a.toFixed(2)}–${b.toFixed(2)} s`); }
+      frame.releasePointerCapture?.(e.pointerId);
+    });
+    frame.addEventListener('dblclick', () => { loopStart = 0; loopEnd = 0; loop = false; $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); $('rangeIn').classList.remove('show'); $('rangeOut').classList.remove('show'); status('LOOP 已清除'); });
+  }
+  function toggleLoop() {
+    loop = !loop; $('loop').textContent = loop ? 'LOOP ON' : 'LOOP OFF'; $('loop').classList.toggle('active', loop);
+    if (loop && buffer && !(loopEnd > loopStart)) { loopStart = 0; loopEnd = buffer.duration; updateRange($('rangeIn'), loopStart, loopEnd); updateRange($('rangeOut'), loopStart, loopEnd); }
+    status(loop ? 'LOOP 開啟' : 'LOOP 關閉');
+  }
+  function toggleBypassAll() { allBypass = !allBypass; $('bypassAll').classList.toggle('active', allBypass); $('bypassAll').textContent = allBypass ? 'BYPASS ON' : 'BYPASS OFF'; sync(); renderProcessedSoon(); status(allBypass ? '全部 Section BYPASS' : '全部 Section ON'); }
+  function updateDelta() { document.querySelectorAll('[data-action="delta"]').forEach((b, i) => b.classList.toggle('active', delta === i + 1)); }
+  function setDelta(i) { delta = delta === i ? 0 : i; updateDelta(); sync(); renderProcessedSoon(); status(delta ? `DELTA SECTION ${delta}：只聽 Wet−Dry` : 'DELTA 已關閉'); }
+  function toggleAB() { saveSlot(); ab = ab === 'A' ? 'B' : 'A'; apply(clone(ab === 'A' ? slotA : slotB), false); $('ab').textContent = 'A/B · ' + ab; status('切換到 ' + ab); }
+
+  function setupKnobs() {
+    document.querySelectorAll('.knob-input').forEach(input => {
+      drawKnob(input, false);
+      input.addEventListener('input', () => { drawKnob(input, true); saveSlot(); sync(); renderProcessedSoon(); });
+      input.addEventListener('change', () => drawKnob(input, false));
+    });
+    document.querySelectorAll('.knob').forEach(knob => {
+      const input = $(knob.dataset.target); if (!input) return;
+      let startY = 0, startValue = 0, active = false;
+      knob.addEventListener('pointerdown', e => { active = true; startY = e.clientY; startValue = +input.value; knob.classList.add('active'); knob.setPointerCapture?.(e.pointerId); drawKnob(input, true); });
+      knob.addEventListener('pointermove', e => { if (!active) return; const key = input.id.replace(/\d+$/, ''), i = +(input.id.match(/\d+$/)?.[0] || 1), [min, max] = limitFor(key, i); setKnob(input, startValue + (startY - e.clientY) * (max - min) / 240, true); });
+      const end = () => { active = false; knob.classList.remove('active'); drawKnob(input, false); };
+      knob.addEventListener('pointerup', end); knob.addEventListener('pointercancel', end);
+      knob.addEventListener('wheel', e => { e.preventDefault(); const key = input.id.replace(/\d+$/, ''), i = +(input.id.match(/\d+$/)?.[0] || 1), [min, max] = limitFor(key, i); setKnob(input, +input.value - e.deltaY * ((max - min) / 240) * 0.18, true); }, { passive: false });
+      knob.addEventListener('keydown', e => { const key = input.id.replace(/\d+$/, ''), i = +(input.id.match(/\d+$/)?.[0] || 1), [, , step] = limitFor(key, i); if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setKnob(input, +input.value + step, true); } if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setKnob(input, +input.value - step, true); } });
+    });
+  }
+  function setupUI() {
+    setupKnobs();
+    $('play').addEventListener('click', togglePlay); $('stop').addEventListener('click', stop); $('loop').addEventListener('click', toggleLoop); $('bypassAll').addEventListener('click', toggleBypassAll); $('ab').addEventListener('click', toggleAB); $('resetAll').addEventListener('click', resetAll); $('resetBands').addEventListener('click', resetBands); $('sortBtn').addEventListener('click', sortBands);
+    document.querySelectorAll('[data-action="bypass"]').forEach((b, i) => b.addEventListener('click', () => setBypass(i + 1, !b.classList.contains('on'))));
+    document.querySelectorAll('[data-action="delta"]').forEach((b, i) => b.addEventListener('click', () => setDelta(i + 1)));
+    document.querySelectorAll('[data-action="reset"]').forEach((b, i) => b.addEventListener('click', () => resetBand(i + 1)));
+    document.querySelectorAll('[data-action="solo"]').forEach((b, i) => b.addEventListener('click', () => setSolo(i + 1, !b.classList.contains('active'))));
+    $('file').addEventListener('change', e => loadFile(e.target.files?.[0]));
+    const inputFrame = $('inputFrame'), dropUi = $('dropUi');
+    [inputFrame, dropUi].forEach(el => { el.addEventListener('dragover', e => e.preventDefault()); el.addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer?.files?.[0]); }); });
+    document.addEventListener('keydown', e => { if (e.code !== 'Space' || e.repeat) return; const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; e.preventDefault(); togglePlay(); });
+    bindRange('inputFrame', 'rangeIn'); bindRange('outputFrame', 'rangeOut');
+    window.addEventListener('resize', () => { if (buffer) { drawSpectrogram($('specIn'), buffer, false); renderProcessed(); } });
+  }
+  function debugState() {
+    const bands = data(), anySolo = bands.some(b => b.solo);
+    return { loaded: !!buffer, playing, loop, loopStart, loopEnd, delta, allBypass, graphReady: !!graph, graphMode, audioState: ctx?.state || 'none', anySolo, soloBands: bands.map((b, i) => b.solo ? i + 1 : 0).filter(Boolean), bands, freqRanges: FREQ_RANGES.map(x => [...x]), activeBands: bands.map((b, i) => (!allBypass && !b.bypass && (!anySolo || b.solo)) ? i + 1 : 0).filter(Boolean) };
+  }
+  function meterRms() {
+    if (!graph?.analyser) return 0;
+    const arr = new Uint8Array(graph.analyser.fftSize); graph.analyser.getByteTimeDomainData(arr); let sum = 0;
+    for (let i = 0; i < arr.length; i++) { const x = (arr[i] - 128) / 128; sum += x * x; }
+    return Math.sqrt(sum / arr.length);
+  }
+  window.myEFX = { loadFile, togglePlay, stopPlayback: stop, currentData: data, debugState, meterRms, freqRanges: FREQ_RANGES };
+  resetAll();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupUI, { once: true }); else setupUI();
 })();
