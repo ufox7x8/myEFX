@@ -25,7 +25,7 @@ function wavFile(filePath, sampleRate = 48000, seconds = 1.25) {
   for (let i = 0; i < frames; i++) {
     const t = i / sampleRate;
     const sample = 0.22 * Math.sin(2 * Math.PI * 1000 * t) + 0.08 * Math.sin(2 * Math.PI * 440 * t);
-    buf.writeInt16LE(Math.max(-1, Math.min(1, sample)) * 32767, 44 + i * 2);
+    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32767), 44 + i * 2);
   }
   fs.writeFileSync(filePath, buf);
 }
@@ -57,33 +57,32 @@ try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 
   const stage1 = await page.evaluate(() => {
-    let errors = [];
+    const errors = [];
     for (let i = 0; i < 650; i++) {
       if (document.querySelectorAll('.knob').length !== 24) errors.push('knob-count');
       if (document.querySelectorAll('.knob-input').length !== 24) errors.push('input-count');
-      if (document.querySelectorAll('[id^="byp"]').length !== 4) errors.push('bypass-count');
+      if (document.querySelectorAll('.band-byp').length !== 4) errors.push('bypass-count');
       if (!window.myEFX || typeof window.myEFX.currentData !== 'function') errors.push('api');
       const scripts = [...document.scripts].map(s => s.src).filter(Boolean);
-      if (!scripts.some(s => s.includes('/WebTester/app.js?v=13') || s.endsWith('/app.js?v=13'))) errors.push('app-path');
+      if (!scripts.some(s => s.endsWith('/app.js?v=13'))) errors.push('app-path');
+      if (scripts.some(s => s.includes('/WebTester/app.js') && !s.endsWith('/app.js?v=13'))) errors.push('stale-app-path');
       const data = window.myEFX.currentData();
       if (data.length !== 4) errors.push('data-length');
-      if (data[0].freq !== 31.5 || data[1].freq !== 125 || data[2].freq !== 1000 || data[3].freq !== 8000) errors.push('defaults');
+      if (Math.abs(data[0].freq - 31.5) > 0.001 || data[1].freq !== 125 || data[2].freq !== 1000 || data[3].freq !== 8000) errors.push('defaults');
     }
     return [...new Set(errors)];
   });
   if (stage1.length) fail('STAGE1 ' + stage1.join(','));
   console.log('STAGE1 650 structural/path/wiring iterations: PASS');
 
-  const fileInput = page.locator('#file');
-  await fileInput.setInputFiles(wav);
+  await page.locator('#file').setInputFiles(wav);
   await page.waitForFunction(() => window.myEFX?.debugState()?.loaded === true, null, { timeout: 10000 });
 
   const stage2 = await page.evaluate(() => {
     const knobs = [...document.querySelectorAll('.knob-input')];
-    let errors = [];
+    const errors = [];
     for (let i = 0; i < 450; i++) {
-      const idx = i % knobs.length;
-      const input = knobs[idx];
+      const input = knobs[i % knobs.length];
       const min = Number(input.min), max = Number(input.max);
       const p = (i % 21) / 20;
       input.value = String(min + (max - min) * p);
@@ -91,7 +90,9 @@ try {
       const state = window.myEFX.debugState();
       const key = input.id.replace(/\d+$/, '');
       const band = Number(input.id.match(/\d+$/)[0]) - 1;
-      if (Math.abs(state.bands[band][key] - Number(input.value)) > Math.max(Number(input.step) || 0.01, 0.02)) errors.push('knob-sync');
+      const expected = Number(input.value);
+      const tolerance = Math.max(Number(input.step) || 0.01, 0.02);
+      if (Math.abs(state.bands[band][key] - expected) > tolerance) errors.push('knob-sync');
       if (i % 9 === 0) document.querySelector('#byp' + ((i % 4) + 1)).click();
       if (i % 11 === 0) document.querySelectorAll('[data-action="delta"]')[i % 4].click();
       if (i % 17 === 0) document.querySelectorAll('[data-action="reset"]')[i % 4].click();
@@ -107,9 +108,10 @@ try {
   await page.locator('#resetAll').click();
   await page.waitForTimeout(100);
   await page.locator('#play').click();
-  await page.waitForTimeout(700);
-  const before = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms() }));
-  if (!before.state.playing || before.rms <= 1e-5) fail('playback/meter failed');
+  await page.waitForTimeout(250);
+  const before = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent || '' }));
+  console.log('PLAYBACK CHECK', JSON.stringify(before));
+  if (!before.state.playing || before.rms <= 1e-5) fail('playback/meter failed: ' + JSON.stringify(before));
 
   const stage3 = await page.evaluate(() => {
     const errors = [];
@@ -134,15 +136,16 @@ try {
   console.log('STAGE3 480 live-graph/control stress iterations: PASS');
 
   await page.evaluate(() => {
+    document.querySelector('#resetAll').click();
     const input = document.querySelector('#gain3');
     input.value = '12';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelectorAll('[data-action="delta"]').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('[data-action="delta"]')[2].click();
   });
-  await page.waitForTimeout(450);
-  const delta = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms() }));
-  if (!delta.state.playing || !delta.state.deltaBand || delta.rms <= 1e-7) fail('delta path silent');
+  await page.waitForTimeout(300);
+  const delta = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent || '' }));
+  console.log('DELTA CHECK', JSON.stringify(delta));
+  if (!delta.state.playing || !delta.state.deltaBand || delta.rms <= 1e-7) fail('delta path silent: ' + JSON.stringify(delta));
 
   const frame = page.locator('#inputFrame');
   const box = await frame.boundingBox();
@@ -160,8 +163,9 @@ try {
   const stage4 = await page.evaluate(() => {
     const errors = [];
     for (let i = 0; i < 320; i++) {
-      document.querySelector('#gain3').value = String((i % 49) - 24);
-      document.querySelector('#gain3').dispatchEvent(new Event('input', { bubbles: true }));
+      const input = document.querySelector('#gain3');
+      input.value = String((i % 49) - 24);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
       if (i % 3 === 0) document.querySelector('[data-action="delta"]').click();
       if (i % 5 === 0) document.querySelector('#bypassAll').click();
       if (i % 7 === 0) document.querySelector('#bypassAll').click();
