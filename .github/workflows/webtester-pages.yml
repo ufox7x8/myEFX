@@ -27,19 +27,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Build canonical WebTester app
-        run: node WebTester/build-v5-fix.js
+        run: |
+          node WebTester/build-v5-fix.js
+          node WebTester/denoise-reference-fix.js
+          node WebTester/denoise-canonicalize.js
+          node WebTester/eq-realtime-patch.js
+          node WebTester/processed-spectrum-fix.js
+          node WebTester/denoise-range-fix.js
       - name: Validate JavaScript syntax
         run: |
           node --check WebTester/build-v5-fix.js
+          node --check WebTester/denoise-reference-fix.js
+          node --check WebTester/denoise-canonicalize.js
+          node --check WebTester/eq-realtime-patch.js
+          node --check WebTester/processed-spectrum-fix.js
+          node --check WebTester/denoise-range-fix.js
           node --check WebTester/app.js
-          node --check WebTester/delta-verify.js
-          node --check WebTester/delta-verify-500.js
-          node --check WebTester/delta-verify-500-v2.js
+          node --check WebTester/delta-verify-500-v3.js
+          node --check WebTester/denoise-range-verify-500.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Run DELTA 500-run verification
-        run: node WebTester/delta-verify-500-v2.js
-      - name: Validate required files and DELTA graph contract
+      - name: Run DELTA and De-noise 500-run verification
+        run: |
+          node WebTester/delta-verify-500-v3.js
+          node WebTester/denoise-range-verify-500.js
+      - name: Validate required files and current graph contract
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app.js
@@ -60,35 +72,19 @@ jobs:
           grep -q 'deltaDryInvert' WebTester/app.js
           grep -q 'deltaMute' WebTester/app.js
           grep -q 'deltaDryDelay' WebTester/app.js
-          grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 1024' WebTester/app.js
+          grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 4096' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 's.deltaBandBP1.Q.setTargetAtTime(q' WebTester/app.js
-          grep -q 's.deltaBandBP2.Q.setTargetAtTime(q' WebTester/app.js
-          grep -q 's.deltaEQ.Q.setTargetAtTime(q' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta11' WebTester/app.js
-          grep -q 'transient-processor.js?v=delta11' WebTester/app.js
-          if grep -q 'deltaBandHP1' WebTester/app.js; then
-            echo 'Old HP/LP DELTA isolation remains'
-            exit 1
-          fi
-          if grep -q 'deltaBandLP1' WebTester/app.js; then
-            echo 'Old HP/LP DELTA isolation remains'
-            exit 1
-          fi
-          if grep -q 'boundaries = new Map' WebTester/app.js; then
-            echo 'Old inter-Section crossover calculation remains'
-            exit 1
-          fi
-          if grep -q 'Feed prior sections normally' WebTester/app.js; then
-            echo 'Old multi-Section DELTA routing remains'
-            exit 1
-          fi
-          if grep -q 'wetBandSum' WebTester/app.js; then
-            echo 'Old mixed WetBand/DryBand DELTA architecture remains'
-            exit 1
-          fi
-          echo 'DELTA contract OK.'
+          grep -q 'function drawProcessedSpectrogram' WebTester/app.js
+          grep -q 'this.clamp(rawAmount / 100, 0.01, 0.99)' WebTester/denoise-processor.js
+          grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
+          grep -q 'transient-processor.js?v=delta16' WebTester/app.js
+          if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
+          if grep -q 'deltaBandLP1' WebTester/app.js; then exit 1; fi
+          if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
+          if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
+          if grep -q 'wetBandSum' WebTester/app.js; then exit 1; fi
+          echo 'Current DELTA + Processed Spectrogram + De-noise contract OK.'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
@@ -97,6 +93,7 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=3"></head>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
