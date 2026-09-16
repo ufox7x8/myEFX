@@ -2,13 +2,7 @@
   'use strict';
 
   const BAND_COUNT = 4;
-  const DEFAULTS = [
-    { freq: 31.5, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
-    { freq: 125, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
-    { freq: 1000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
-    { freq: 8000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false }
-  ];
-  const INFO = {
+  const KNOB_INFO = {
     freq: { min: 20, max: 20000, step: 1 },
     gain: { min: -24, max: 24, step: 0.1 },
     q: { min: 0.1, max: 20, step: 0.01 },
@@ -16,308 +10,753 @@
     punch: { min: -100, max: 100, step: 1 },
     sustain: { min: -100, max: 100, step: 1 }
   };
-  const FULL_RANGE_TRAVEL_PX = 240;
+  const DEFAULTS = [
+    { freq: 31.5, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 125, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 1000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false },
+    { freq: 8000, gain: 0, q: 1, denoise: 0, punch: 0, sustain: 0, bypass: false }
+  ];
+  const KNOB_TRAVEL_PX = 240;
   const $ = id => document.getElementById(id);
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const cloneData = d => d.map(x => ({ ...x }));
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const copyBands = bands => bands.map(b => ({ ...b }));
 
-  let ctx = null, buffer = null, source = null, graph = null;
-  let playing = false, loop = false, bypassAll = false;
-  let offset = 0, startAt = 0, raf = 0;
-  let deltaBand = 0, loopStart = 0, loopEnd = 0;
-  let renderTimer = 0, renderToken = 0;
-  let slot = 'A', slotA = cloneData(DEFAULTS), slotB = cloneData(DEFAULTS);
+  let audioContext = null;
+  let buffer = null;
+  let source = null;
+  let graph = null;
+  let playing = false;
+  let loopEnabled = false;
+  let globalBypass = false;
+  let deltaBand = 0;
+  let loopStart = 0;
+  let loopEnd = 0;
+  let offset = 0;
+  let startedAt = 0;
+  let animationFrame = 0;
   let rangeDrag = null;
+  let renderTimer = 0;
+  let renderSerial = 0;
+  let abSlot = 'A';
+  let slotA = copyBands(DEFAULTS);
+  let slotB = copyBands(DEFAULTS);
 
-  function status(t) { const e = $('status'); if (e) e.textContent = t; }
+  function setStatus(text) {
+    const el = $('status');
+    if (el) el.textContent = text;
+  }
+
   function currentData() {
     return Array.from({ length: BAND_COUNT }, (_, n) => {
       const i = n + 1;
       return {
-        freq: Number($('freq' + i).value), gain: Number($('gain' + i).value), q: Number($('q' + i).value),
-        denoise: Number($('denoise' + i).value), punch: Number($('punch' + i).value), sustain: Number($('sustain' + i).value),
-        bypass: !$('byp' + i).classList.contains('on')
+        freq: Number($("freq" + i).value),
+        gain: Number($("gain" + i).value),
+        q: Number($("q" + i).value),
+        denoise: Number($("denoise" + i).value),
+        punch: Number($("punch" + i).value),
+        sustain: Number($("sustain" + i).value),
+        bypass: !$("byp" + i).classList.contains('on')
       };
     });
   }
-  function saveSlot() { if (slot === 'A') slotA = currentData(); else slotB = currentData(); }
-  function formatValue(key, v) {
-    if (key === 'freq') return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 1 : 2) + ' kHz' : (v % 1 ? v.toFixed(1) : Math.round(v)) + ' Hz';
-    if (key === 'gain') return v.toFixed(1) + ' dB';
-    if (key === 'q') return v.toFixed(2);
-    return Math.round(v) + '%';
+
+  function saveABSlot() {
+    if (abSlot === 'A') slotA = currentData();
+    else slotB = currentData();
   }
+
+  function formatValue(key, value) {
+    if (key === 'freq') {
+      return value >= 1000
+        ? (value / 1000).toFixed(value >= 10000 ? 1 : 2) + ' kHz'
+        : (value % 1 ? value.toFixed(1) : Math.round(value)) + ' Hz';
+    }
+    if (key === 'gain') return value.toFixed(1) + ' dB';
+    if (key === 'q') return value.toFixed(2);
+    return Math.round(value) + '%';
+  }
+
   function renderKnob(input, reveal = false) {
     if (!input) return;
-    const key = input.id.replace(/[0-9]+$/, ''), d = INFO[key], v = Number(input.value);
-    const knob = document.querySelector(`.knob[data-target="${input.id}"]`); if (!knob) return;
-    const angle = -135 + 270 * ((v - d.min) / (d.max - d.min));
-    const p = knob.querySelector('.knob-pointer'); if (p) p.style.transform = `translateX(-50%) rotate(${angle}deg)`;
-    const out = $(input.id + 'Out'); if (out) { out.textContent = formatValue(key, v); out.classList.toggle('show', reveal); }
+    const key = input.id.replace(/\d+$/, '');
+    const info = KNOB_INFO[key];
+    const value = Number(input.value);
+    const knob = document.querySelector('.knob[data-target="' + input.id + '"]');
+    if (!knob) return;
+    const angle = -135 + 270 * ((value - info.min) / (info.max - info.min));
+    const pointer = knob.querySelector('.knob-pointer');
+    if (pointer) pointer.style.transform = 'translateX(-50%) rotate(' + angle + 'deg)';
+    const readout = $(input.id + 'Out');
+    if (readout) {
+      readout.textContent = formatValue(key, value);
+      readout.classList.toggle('show', reveal);
+    }
   }
-  function setInput(input, value, trigger = true, reveal = true) {
-    const key = input.id.replace(/[0-9]+$/, ''), d = INFO[key];
-    const decimals = (String(d.step).split('.')[1] || '').length;
-    let v = clamp(value, d.min, d.max);
-    v = Number((Math.round(v / d.step) * d.step).toFixed(decimals));
-    input.value = String(v); renderKnob(input, reveal);
-    if (trigger) input.dispatchEvent(new Event('input', { bubbles: true }));
+
+  function setInputValue(input, rawValue, reveal = true, notify = true) {
+    const key = input.id.replace(/\d+$/, '');
+    const info = KNOB_INFO[key];
+    const decimals = (String(info.step).split('.')[1] || '').length;
+    let value = clamp(Number(rawValue), info.min, info.max);
+    value = Number((Math.round(value / info.step) * info.step).toFixed(decimals));
+    input.value = String(value);
+    renderKnob(input, reveal);
+    if (notify) input.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  function knobDeltaPerPixel(key) { const d = INFO[key]; return (d.max - d.min) / FULL_RANGE_TRAVEL_PX; }
-  function setBandBypass(i, on, update = true) {
-    const b = $('byp' + i); if (!b) return;
-    b.classList.toggle('on', on); b.classList.toggle('off', !on);
-    const s = document.querySelector(`.band[data-band="${i}"] .state`); if (s) s.textContent = on ? 'ON' : 'BYP';
-    if (update) { syncGraph(); saveSlot(); scheduleProcessedRender(); }
+
+  function knobDeltaPerPixel(key) {
+    const info = KNOB_INFO[key];
+    return (info.max - info.min) / KNOB_TRAVEL_PX;
   }
-  function applyData(data) {
+
+  function setBandBypass(index, enabled, update = true) {
+    const button = $('byp' + index);
+    if (!button) return;
+    button.classList.toggle('on', enabled);
+    button.classList.toggle('off', !enabled);
+    const state = document.querySelector('.band[data-band="' + index + '"] .state');
+    if (state) state.textContent = enabled ? 'ON' : 'BYP';
+    if (update) {
+      saveABSlot();
+      syncGraph();
+      scheduleProcessedRender();
+    }
+  }
+
+  function applyBands(bands, writeSlot = false) {
+    const safeBands = bands || DEFAULTS;
     for (let i = 1; i <= BAND_COUNT; i++) {
-      const b = data[i - 1] || DEFAULTS[i - 1];
-      for (const k of Object.keys(INFO)) { const input = $(k + i); if (input) { input.value = String(clamp(Number(b[k]), INFO[k].min, INFO[k].max)); renderKnob(input); } }
+      const b = safeBands[i - 1] || DEFAULTS[i - 1];
+      for (const key of Object.keys(KNOB_INFO)) {
+        const input = $(key + i);
+        if (!input) continue;
+        input.value = String(clamp(Number(b[key]), KNOB_INFO[key].min, KNOB_INFO[key].max));
+        renderKnob(input, false);
+      }
       setBandBypass(i, !b.bypass, false);
     }
-    syncGraph(); scheduleProcessedRender();
+    if (writeSlot) saveABSlot();
+    syncGraph();
+    scheduleProcessedRender();
   }
-  function resetAll() { applyData(cloneData(DEFAULTS)); saveSlot(); status('所有 Sections 已重設。'); }
-  function resetBand(i) { const d = currentData(); d[i - 1] = { ...DEFAULTS[i - 1] }; applyData(d); saveSlot(); status(`SECTION ${i} 已重設。`); }
-  function sortBands() { const d = currentData().sort((a, b) => a.freq - b.freq); applyData(d); saveSlot(); status('Sections 已依頻率排序。'); }
-  function ensureContext() { if (!ctx || ctx.state === 'closed') ctx = new AudioContext(); return ctx; }
 
-  // Four independent parallel Sections. Each Section compares the same band before/after processing.
-  // Normal output: original full-band + Σ(WetBand - DryBand).
-  // DELTA: only one selected (WetBand - DryBand).
+  function resetAll() {
+    deltaBand = 0;
+    globalBypass = false;
+    $('bypassAll').textContent = 'BYPASS OFF';
+    $('bypassAll').classList.remove('active');
+    applyBands(copyBands(DEFAULTS), true);
+    updateDeltaUI();
+    setStatus('所有 Sections 已重設。');
+  }
+
+  function resetBand(index) {
+    const data = currentData();
+    data[index - 1] = { ...DEFAULTS[index - 1] };
+    applyBands(data, true);
+    setStatus('SECTION ' + index + ' 已重設。');
+  }
+
+  function sortBands() {
+    const sorted = currentData().sort((a, b) => a.freq - b.freq);
+    applyBands(sorted, true);
+    setStatus('Sections 已依頻率排序。');
+  }
+
+  function ensureAudioContext() {
+    if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContext();
+    return audioContext;
+  }
+
   async function ensureGraph() {
-    const c = ensureContext();
-    if (!c.audioWorklet) throw new Error('瀏覽器不支援 AudioWorklet');
-    if (!graph) {
-      await c.audioWorklet.addModule('denoise-processor.js?v=rewrite2');
-      await c.audioWorklet.addModule('transient-processor.js?v=rewrite2');
-      const master = c.createGain();
-      const dryMaster = c.createGain();
-      dryMaster.connect(master); master.connect(c.destination);
-      const stages = [];
-      for (let i = 0; i < BAND_COUNT; i++) {
-        const band = c.createBiquadFilter(); band.type = 'bandpass';
-        const eq = c.createBiquadFilter(); eq.type = 'peaking';
-        const denoise = new AudioWorkletNode(c, 'myefx-denoise', { parameterData: { amount: 0 } });
-        const transient = new AudioWorkletNode(c, 'myefx-transient', { parameterData: { punch: 0, sustain: 0 } });
-        const wet = c.createGain();
-        const dry = c.createGain();
-        const invert = c.createGain(); invert.gain.value = -1;
-        const change = c.createGain();
-        const normalGain = c.createGain();
-        const deltaGain = c.createGain();
-        dry.connect(invert); invert.connect(change);
-        band.connect(dry); band.connect(eq); eq.connect(denoise); denoise.connect(transient); transient.connect(wet); wet.connect(change);
-        change.connect(normalGain); normalGain.connect(master);
-        change.connect(deltaGain); deltaGain.connect(master);
-        stages.push({ band, eq, denoise, transient, wet, dry, invert, change, normalGain, deltaGain });
-      }
-      graph = { master, dryMaster, stages };
+    const ctx = ensureAudioContext();
+    if (!ctx.audioWorklet) throw new Error('瀏覽器不支援 AudioWorklet。');
+    if (graph) return graph;
+
+    const denoiseUrl = new URL('denoise-processor.js?build=clean650', location.href).href;
+    const transientUrl = new URL('transient-processor.js?build=clean650', location.href).href;
+    await ctx.audioWorklet.addModule(denoiseUrl);
+    await ctx.audioWorklet.addModule(transientUrl);
+
+    const master = ctx.createGain();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.05;
+    master.connect(analyser);
+    analyser.connect(ctx.destination);
+
+    const dryBus = ctx.createGain();
+    const normalBus = ctx.createGain();
+    const deltaBus = ctx.createGain();
+    const dryMaster = ctx.createGain();
+    const normalMaster = ctx.createGain();
+    const deltaMaster = ctx.createGain();
+    dryBus.connect(dryMaster);
+    dryMaster.connect(master);
+    normalBus.connect(normalMaster);
+    normalMaster.connect(master);
+    deltaBus.connect(deltaMaster);
+    deltaMaster.connect(master);
+
+    const stages = [];
+    for (let i = 0; i < BAND_COUNT; i++) {
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      const eq = ctx.createBiquadFilter();
+      eq.type = 'peaking';
+      const denoise = new AudioWorkletNode(ctx, 'myefx-denoise', { parameterData: { amount: 0 } });
+      const transient = new AudioWorkletNode(ctx, 'myefx-transient', { parameterData: { punch: 0, sustain: 0 } });
+      const dry = ctx.createGain();
+      const wet = ctx.createGain();
+      const invertDry = ctx.createGain();
+      invertDry.gain.value = -1;
+      const change = ctx.createGain();
+      const normalGate = ctx.createGain();
+      const deltaGate = ctx.createGain();
+
+      band.connect(dry);
+      dry.connect(invertDry);
+      invertDry.connect(change);
+      band.connect(eq);
+      eq.connect(denoise);
+      denoise.connect(transient);
+      transient.connect(wet);
+      wet.connect(change);
+      change.connect(normalGate);
+      normalGate.connect(normalBus);
+      change.connect(deltaGate);
+      deltaGate.connect(deltaBus);
+
+      stages.push({ band, eq, denoise, transient, dry, wet, invertDry, change, normalGate, deltaGate });
     }
+
+    graph = { master, analyser, dryBus, normalBus, deltaBus, dryMaster, normalMaster, deltaMaster, stages };
     syncGraph();
     return graph;
   }
 
   function syncGraph() {
-    if (!graph || !ctx) return;
-    const now = ctx.currentTime;
-    currentData().forEach((b, i) => {
-      const s = graph.stages[i];
-      s.band.frequency.setTargetAtTime(b.freq, now, .003);
-      s.band.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .003);
-      s.eq.frequency.setTargetAtTime(b.freq, now, .003);
-      s.eq.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .003);
-      s.eq.gain.setTargetAtTime(b.gain, now, .003);
-      s.denoise.parameters.get('amount')?.setTargetAtTime(b.denoise, now, .003);
-      s.transient.parameters.get('punch')?.setTargetAtTime(b.punch, now, .003);
-      s.transient.parameters.get('sustain')?.setTargetAtTime(b.sustain, now, .003);
-      s.denoise.port.postMessage({ type: 'band', freq: b.freq, q: b.q });
-      s.transient.port.postMessage({ type: 'band', freq: b.freq, q: b.q });
-      const normal = (!bypassAll && !deltaBand && !b.bypass) ? 1 : 0;
-      const monitor = (!bypassAll && deltaBand === i + 1 && !b.bypass) ? 1 : 0;
-      s.normalGain.gain.setTargetAtTime(normal, now, .003);
-      s.deltaGain.gain.setTargetAtTime(monitor, now, .003);
+    if (!graph || !audioContext) return;
+    const now = audioContext.currentTime;
+    const data = currentData();
+
+    graph.stages.forEach((stage, i) => {
+      const b = data[i];
+      stage.band.frequency.setTargetAtTime(b.freq, now, 0.003);
+      stage.band.Q.setTargetAtTime(clamp(b.q, 0.25, 18), now, 0.003);
+      stage.eq.frequency.setTargetAtTime(b.freq, now, 0.003);
+      stage.eq.Q.setTargetAtTime(clamp(b.q, 0.25, 18), now, 0.003);
+      stage.eq.gain.setTargetAtTime(b.gain, now, 0.003);
+      stage.denoise.parameters.get('amount')?.setTargetAtTime(b.denoise, now, 0.003);
+      stage.transient.parameters.get('punch')?.setTargetAtTime(b.punch, now, 0.003);
+      stage.transient.parameters.get('sustain')?.setTargetAtTime(b.sustain, now, 0.003);
+      stage.denoise.port.postMessage({ type: 'band', freq: b.freq, q: b.q });
+      stage.transient.port.postMessage({ type: 'band', freq: b.freq, q: b.q });
+      const active = !globalBypass && !b.bypass;
+      stage.normalGate.gain.setTargetAtTime(active && !deltaBand ? 1 : 0, now, 0.003);
+      stage.deltaGate.gain.setTargetAtTime(active && deltaBand === i + 1 ? 1 : 0, now, 0.003);
     });
-    graph.dryMaster.gain.setTargetAtTime(bypassAll || deltaBand ? (bypassAll ? 1 : 0) : 1, now, .003);
+
+    graph.dryMaster.gain.setTargetAtTime(globalBypass || !deltaBand ? 1 : 0, now, 0.003);
+    graph.normalMaster.gain.setTargetAtTime(globalBypass || deltaBand ? 0 : 1, now, 0.003);
+    graph.deltaMaster.gain.setTargetAtTime(globalBypass ? 0 : (deltaBand ? 1 : 0), now, 0.003);
   }
 
-  function disconnectPlayback() {
+  function disconnectSource() {
     if (!source) return;
     try { source.stop(); } catch (_) {}
     try { source.disconnect(); } catch (_) {}
     source = null;
   }
-  function connectPlayback() {
-    disconnectPlayback();
-    source = ctx.createBufferSource(); source.buffer = buffer;
-    const a = loopEnd > loopStart ? loopStart : 0, b = loopEnd > loopStart ? loopEnd : buffer.duration;
-    source.loop = loop; source.loopStart = a; source.loopEnd = b;
-    source.connect(graph.dryMaster);
-    graph.stages.forEach(s => source.connect(s.band));
+
+  function activeLoopBounds() {
+    if (buffer && loopEnd > loopStart) return [loopStart, loopEnd];
+    return [0, buffer ? buffer.duration : 0];
+  }
+
+  function connectSource() {
+    disconnectSource();
+    source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.loop = loopEnabled;
+    const [a, b] = activeLoopBounds();
+    if (b > a) {
+      source.loopStart = a;
+      source.loopEnd = b;
+    }
+    source.connect(graph.dryBus);
+    graph.stages.forEach(stage => source.connect(stage.band));
     syncGraph();
   }
+
   async function startPlayback() {
-    if (!buffer) return status('請先載入音檔。');
-    try {
-      const c = ensureContext(); await c.resume(); await ensureGraph();
-      connectPlayback(); startAt = c.currentTime;
-      const a = loopEnd > loopStart ? loopStart : 0;
-      source.start(0, clamp(loop ? Math.max(a, offset) : offset, 0, Math.max(0, buffer.duration - .001)));
-      playing = true; $('play').textContent = '❚❚ 停止';
-      status(deltaBand ? `DELTA SECTION ${deltaBand}：只聽該頻帶 Wet−Dry 異動` : loop ? 'LOOP 播放中' : '播放中');
-      updateCursor();
-    } catch (e) { playing = false; status('播放失敗：' + (e.message || e)); console.error(e); }
-  }
-  function restartAtCurrentPosition() {
-    if (!playing || !ctx || !buffer) return;
-    const elapsed = Math.max(0, ctx.currentTime - startAt);
-    const a = loopEnd > loopStart ? loopStart : 0, b = loopEnd > loopStart ? loopEnd : buffer.duration;
-    offset = loop ? a + ((offset + elapsed - a) % Math.max(.001, b - a)) : Math.min(buffer.duration, offset + elapsed);
-    connectPlayback(); startAt = ctx.currentTime; source.start(0, offset);
-  }
-  function stopPlayback() {
-    if (playing && ctx && buffer) {
-      const elapsed = Math.max(0, ctx.currentTime - startAt);
-      const a = loopEnd > loopStart ? loopStart : 0, b = loopEnd > loopStart ? loopEnd : buffer.duration;
-      offset = loop ? a + ((offset + elapsed - a) % Math.max(.001, b - a)) : Math.min(buffer.duration, offset + elapsed);
+    if (!buffer) {
+      setStatus('請先載入音檔。');
+      return;
     }
-    playing = false; disconnectPlayback(); cancelAnimationFrame(raf); raf = 0;
-    $('play').textContent = '▶ 播放'; setCursor(buffer ? offset / buffer.duration : 0); status('已停止');
+    try {
+      const ctx = ensureAudioContext();
+      await ctx.resume();
+      await ensureGraph();
+      connectSource();
+      const [a, b] = activeLoopBounds();
+      let startOffset = offset;
+      if (loopEnabled) startOffset = clamp(startOffset, a, Math.max(a, b - 0.001));
+      else startOffset = clamp(startOffset, 0, Math.max(0, buffer.duration - 0.001));
+      startedAt = ctx.currentTime;
+      source.start(0, startOffset);
+      playing = true;
+      $('play').textContent = '❚❚ 停止';
+      setStatus(deltaBand ? 'DELTA SECTION ' + deltaBand + '：只聽該頻帶 Wet−Dry 異動' : loopEnabled ? 'LOOP 播放中' : '播放中');
+      tickCursor();
+    } catch (error) {
+      playing = false;
+      disconnectSource();
+      setStatus('播放失敗：' + (error?.message || error));
+      console.error(error);
+    }
   }
-  function togglePlay() { playing ? stopPlayback() : startPlayback(); }
-  function updateCursor() {
-    if (!playing || !buffer || !ctx) return;
-    const a = loopEnd > loopStart ? loopStart : 0, b = loopEnd > loopStart ? loopEnd : buffer.duration;
-    const p = loop ? a + ((offset + ctx.currentTime - startAt - a) % Math.max(.001, b - a)) : offset + ctx.currentTime - startAt;
-    if (!loop && p >= buffer.duration) return stopPlayback();
-    setCursor(p / buffer.duration); raf = requestAnimationFrame(updateCursor);
+
+  function stopPlayback() {
+    if (playing && audioContext && buffer) {
+      const elapsed = Math.max(0, audioContext.currentTime - startedAt);
+      const [a, b] = activeLoopBounds();
+      if (loopEnabled && b > a) {
+        const length = b - a;
+        offset = a + ((offset + elapsed - a) % length + length) % length;
+      } else {
+        offset = clamp(offset + elapsed, 0, buffer.duration);
+      }
+    }
+    playing = false;
+    disconnectSource();
+    cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+    $('play').textContent = '▶ 播放';
+    setCursor(buffer ? offset / buffer.duration : 0);
+    setStatus('已停止');
   }
-  function setCursor(p) { p = clamp(p, 0, 1); $('cursorIn').style.left = p * 100 + '%'; $('cursorOut').style.left = p * 100 + '%'; $('time').textContent = buffer ? `${(p * buffer.duration).toFixed(2)} / ${buffer.duration.toFixed(2)} s` : '0.00 / 0.00 s'; }
+
+  function togglePlay() {
+    if (playing) stopPlayback();
+    else startPlayback();
+  }
+
+  function restartPlaybackAtCurrentPosition() {
+    if (!playing || !buffer || !audioContext) return;
+    const elapsed = Math.max(0, audioContext.currentTime - startedAt);
+    const [a, b] = activeLoopBounds();
+    if (loopEnabled && b > a) {
+      const length = b - a;
+      offset = a + ((offset + elapsed - a) % length + length) % length;
+    } else {
+      offset = clamp(offset + elapsed, 0, buffer.duration);
+    }
+    connectSource();
+    startedAt = audioContext.currentTime;
+    source.start(0, offset);
+  }
+
+  function tickCursor() {
+    if (!playing || !buffer || !audioContext) return;
+    const elapsed = Math.max(0, audioContext.currentTime - startedAt);
+    const [a, b] = activeLoopBounds();
+    let position;
+    if (loopEnabled && b > a) position = a + ((offset + elapsed - a) % (b - a) + (b - a)) % (b - a);
+    else position = offset + elapsed;
+    if (!loopEnabled && position >= buffer.duration) {
+      offset = buffer.duration;
+      stopPlayback();
+      return;
+    }
+    setCursor(position / buffer.duration);
+    animationFrame = requestAnimationFrame(tickCursor);
+  }
+
+  function setCursor(progress) {
+    const p = clamp(progress, 0, 1);
+    if ($('cursorIn')) $('cursorIn').style.left = (p * 100) + '%';
+    if ($('cursorOut')) $('cursorOut').style.left = (p * 100) + '%';
+    $('time').textContent = buffer ? p.toFixed(4).replace('0.', '') && `${(p * buffer.duration).toFixed(2)} / ${buffer.duration.toFixed(2)} s` : '0.00 / 0.00 s';
+  }
 
   function fft(re, im) {
     const n = re.length;
-    for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
-    for (let len = 2; len <= n; len <<= 1) {
-      const ang = -2 * Math.PI / len, wc = Math.cos(ang), ws = Math.sin(ang);
-      for (let i = 0; i < n; i += len) { let wr = 1, wi = 0, h = len >> 1; for (let j = 0; j < h; j++) { const x = i + j, y = x + h, vr = re[y] * wr - im[y] * wi, vi = re[y] * wi + im[y] * wr; re[y] = re[x] - vr; im[y] = im[x] - vi; re[x] += vr; im[x] += vi; const tr = wr * wc - wi * ws; wi = wr * ws + wi * wc; wr = tr; } }
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [re[i], re[j]] = [re[j], re[i]];
+        [im[i], im[j]] = [im[j], im[i]];
+      }
     }
-  }
-  function drawInputSpectrogram() { if (buffer) drawSpectrogram($('specIn'), false); }
-  function drawSpectrogram(canvas, processed) {
-    if (!buffer) return;
-    const w = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio)), h = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio));
-    canvas.width = w; canvas.height = h;
-    const c = canvas.getContext('2d'); c.fillStyle = '#02070a'; c.fillRect(0, 0, w, h);
-    const src = buffer.getChannelData(0), N = 1024, bins = N / 2, cols = Math.min(900, w), hop = Math.max(1, Math.floor(src.length / Math.max(1, cols - 1)));
-    const re = new Float64Array(N), im = new Float64Array(N);
-    for (let x = 0; x < cols; x++) {
-      const start = Math.min(x * hop, Math.max(0, src.length - N));
-      for (let n = 0; n < N; n++) { const win = .5 - .5 * Math.cos(2 * Math.PI * n / (N - 1)); re[n] = src[start + n] * win; im[n] = 0; }
-      fft(re, im);
-      for (let y = 0; y < h; y++) {
-        const k = clamp(Math.floor((1 - y / h) * bins), 1, bins - 1), hz = k * buffer.sampleRate / N;
-        const db = 20 * Math.log10(Math.hypot(re[k], im[k]) / N + 1e-10);
-        const strength = processed ? changeStrength(hz) : 1;
-        if (processed && strength < .003) continue;
-        const v = clamp((db + 90) / 75, 0, 1) * strength;
-        if (v < .004) continue;
-        const q = Math.round(v * 255); c.fillStyle = `rgb(${q},${Math.min(255, q + 25)},${Math.min(255, q + 45)})`;
-        c.fillRect(Math.floor(x * w / cols), y, Math.ceil(w / cols) + 1, 1);
+    for (let len = 2; len <= n; len <<= 1) {
+      const angle = -2 * Math.PI / len;
+      const wc = Math.cos(angle), ws = Math.sin(angle);
+      for (let i = 0; i < n; i += len) {
+        let wr = 1, wi = 0;
+        const half = len >> 1;
+        for (let j = 0; j < half; j++) {
+          const x = i + j, y = x + half;
+          const vr = re[y] * wr - im[y] * wi;
+          const vi = re[y] * wi + im[y] * wr;
+          re[y] = re[x] - vr; im[y] = im[x] - vi;
+          re[x] += vr; im[x] += vi;
+          const nextWr = wr * wc - wi * ws;
+          wi = wr * ws + wi * wc; wr = nextWr;
+        }
       }
     }
   }
-  function bandWeight(hz, b) { const oct = Math.log2(Math.max(.001, hz) / Math.max(20, b.freq)); const width = .35 + 2 / Math.max(.25, b.q); return Math.exp(-Math.pow(oct / width, 2)); }
+
+  function bandWeight(hz, band) {
+    const octaves = Math.log2(Math.max(20, hz) / Math.max(20, band.freq));
+    const width = 0.35 + 2 / Math.max(0.25, band.q);
+    return Math.exp(-Math.pow(octaves / width, 2));
+  }
+
   function changeStrength(hz) {
-    let s = 0;
+    let strength = 0;
     for (const b of currentData()) {
       if (b.bypass) continue;
       const w = bandWeight(hz, b);
-      const eq = Math.abs(Math.pow(10, b.gain / 20) - 1) * w;
-      const dn = (b.denoise / 100) * .8 * w;
-      const tr = (Math.abs(b.punch) + Math.abs(b.sustain)) / 200 * .55 * w;
-      s += eq + dn + tr;
+      strength += Math.abs(Math.pow(10, b.gain / 20) - 1) * w;
+      strength += (b.denoise / 100) * 0.8 * w;
+      strength += ((Math.abs(b.punch) + Math.abs(b.sustain)) / 200) * 0.55 * w;
     }
-    return clamp(s, 0, 1);
+    return clamp(strength, 0, 1);
   }
-  function scheduleProcessedRender() { clearTimeout(renderTimer); if (!buffer) return; const token = ++renderToken; renderTimer = setTimeout(() => { if (token !== renderToken) return; drawSpectrogram($('specOut'), true); }, 80); }
+
+  function drawSpectrogram(canvas, processed) {
+    if (!buffer || !canvas) return;
+    const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio));
+    const height = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio));
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#02070a';
+    g.fillRect(0, 0, width, height);
+
+    const input = buffer.getChannelData(0);
+    const N = 1024;
+    const bins = N / 2;
+    const columns = Math.min(900, width);
+    const hop = Math.max(1, Math.floor(input.length / Math.max(1, columns - 1)));
+    const re = new Float64Array(N);
+    const im = new Float64Array(N);
+
+    for (let x = 0; x < columns; x++) {
+      const start = Math.min(x * hop, Math.max(0, input.length - N));
+      for (let n = 0; n < N; n++) {
+        const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / (N - 1));
+        re[n] = input[start + n] * window;
+        im[n] = 0;
+      }
+      fft(re, im);
+      for (let y = 0; y < height; y++) {
+        const k = clamp(Math.floor((1 - y / height) * bins), 1, bins - 1);
+        const hz = k * buffer.sampleRate / N;
+        const db = 20 * Math.log10(Math.hypot(re[k], im[k]) / N + 1e-10);
+        const strength = processed ? changeStrength(hz) : 1;
+        if (processed && strength < 0.003) continue;
+        const intensity = clamp((db + 90) / 75, 0, 1) * strength;
+        if (intensity < 0.004) continue;
+        const q = Math.round(intensity * 255);
+        g.fillStyle = 'rgb(' + q + ',' + Math.min(255, q + 25) + ',' + Math.min(255, q + 45) + ')';
+        g.fillRect(Math.floor(x * width / columns), y, Math.ceil(width / columns) + 1, 1);
+      }
+    }
+  }
+
+  function drawInputSpectrogram() {
+    if (buffer) drawSpectrogram($('specIn'), false);
+  }
+
+  function scheduleProcessedRender() {
+    if (!buffer) return;
+    clearTimeout(renderTimer);
+    const serial = ++renderSerial;
+    renderTimer = setTimeout(() => {
+      if (serial !== renderSerial) return;
+      drawSpectrogram($('specOut'), true);
+    }, 60);
+  }
 
   async function loadFile(file) {
     if (!file) return;
     try {
-      stopPlayback(); const c = ensureContext(); const data = await file.arrayBuffer(); const decoded = await c.decodeAudioData(data);
-      buffer = decoded; offset = 0; loop = false; loopStart = loopEnd = 0; deltaBand = 0;
+      stopPlayback();
+      const ctx = ensureAudioContext();
+      const arrayBuffer = await file.arrayBuffer();
+      const decoded = await ctx.decodeAudioData(arrayBuffer);
+      buffer = decoded;
+      offset = 0;
+      loopEnabled = false;
+      loopStart = 0;
+      loopEnd = 0;
+      deltaBand = 0;
+      globalBypass = false;
+      $('bypassAll').textContent = 'BYPASS OFF';
+      $('bypassAll').classList.remove('active');
       $('fileInfo').textContent = `${file.name} · ${decoded.sampleRate} Hz · ${decoded.numberOfChannels} ch · ${decoded.duration.toFixed(2)} s`;
-      $('dropUi').style.display = 'none'; setCursor(0); clearRangeUI(); updateDeltaUI(); drawInputSpectrogram(); scheduleProcessedRender(); status('音檔已載入。');
-    } catch (e) { buffer = null; $('dropUi').style.display = ''; status('音檔載入失敗：' + (e.message || e)); console.error(e); }
+      $('dropUi').style.display = 'none';
+      $('loop').textContent = 'LOOP OFF';
+      $('loop').classList.remove('active');
+      clearRangeUI();
+      setCursor(0);
+      updateDeltaUI();
+      drawInputSpectrogram();
+      scheduleProcessedRender();
+      setStatus('音檔已載入。');
+    } catch (error) {
+      buffer = null;
+      $('dropUi').style.display = '';
+      setStatus('音檔載入失敗：' + (error?.message || error));
+      console.error(error);
+    }
   }
-  function clearRangeUI() { ['rangeIn', 'rangeOut'].forEach(id => $(id)?.classList.remove('show')); }
-  function drawSelection(which, a, b) { const r = $(which === 'in' ? 'rangeIn' : 'rangeOut'); if (!r) return; r.style.left = a * 100 + '%'; r.style.width = (b - a) * 100 + '%'; r.classList.add('show'); }
-  function rangeX(frame, e) { const r = frame.getBoundingClientRect(); return clamp((e.clientX - r.left) / r.width, 0, 1); }
+
+  function clearRangeUI() {
+    ['rangeIn', 'rangeOut'].forEach(id => $(id)?.classList.remove('show'));
+  }
+
+  function drawSelection(which, start, end) {
+    const range = $(which === 'in' ? 'rangeIn' : 'rangeOut');
+    if (!range) return;
+    range.style.left = (start * 100) + '%';
+    range.style.width = ((end - start) * 100) + '%';
+    range.classList.add('show');
+  }
+
+  function rangeProgress(frame, event) {
+    const rect = frame.getBoundingClientRect();
+    return clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+  }
+
   function bindRange(which) {
     const frame = $(which === 'in' ? 'inputFrame' : 'outputFrame');
-    frame.addEventListener('pointerdown', e => { if (e.button !== 0 || !buffer || e.target.closest('.drop-card')) return; rangeDrag = { which, start: rangeX(frame, e) }; frame.setPointerCapture?.(e.pointerId); });
-    frame.addEventListener('pointermove', e => { if (!rangeDrag || rangeDrag.which !== which) return; const x = rangeX(frame, e), a = Math.min(rangeDrag.start, x), b = Math.max(rangeDrag.start, x); drawSelection(which, a, b); });
-    frame.addEventListener('pointerup', e => {
+    if (!frame) return;
+    frame.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || !buffer || event.target.closest('.drop-card')) return;
+      rangeDrag = { which, start: rangeProgress(frame, event) };
+      frame.setPointerCapture?.(event.pointerId);
+    });
+    frame.addEventListener('pointermove', event => {
       if (!rangeDrag || rangeDrag.which !== which) return;
-      const x = rangeX(frame, e), a = Math.min(rangeDrag.start, x), b = Math.max(rangeDrag.start, x); rangeDrag = null;
-      if (b - a < .01) return clearRangeUI();
-      loopStart = a * buffer.duration; loopEnd = b * buffer.duration; loop = true; offset = loopStart;
-      $('loop').textContent = `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s`; $('loop').classList.add('active');
-      drawSelection('in', a, b); drawSelection('out', a, b); if (playing) restartAtCurrentPosition();
-      status(`LOOP 範圍 ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)} s`);
+      const x = rangeProgress(frame, event);
+      drawSelection(which, Math.min(rangeDrag.start, x), Math.max(rangeDrag.start, x));
+    });
+    frame.addEventListener('pointerup', event => {
+      if (!rangeDrag || rangeDrag.which !== which) return;
+      const x = rangeProgress(frame, event);
+      const a = Math.min(rangeDrag.start, x);
+      const b = Math.max(rangeDrag.start, x);
+      rangeDrag = null;
+      if (b - a < 0.01) return;
+      loopStart = a * buffer.duration;
+      loopEnd = b * buffer.duration;
+      loopEnabled = true;
+      offset = loopStart;
+      drawSelection('in', a, b);
+      drawSelection('out', a, b);
+      $('loop').textContent = `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s`;
+      $('loop').classList.add('active');
+      if (playing) restartPlaybackAtCurrentPosition();
+      setStatus(`LOOP 範圍 ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)} s`);
     });
     frame.addEventListener('pointercancel', () => { rangeDrag = null; });
-    frame.addEventListener('dblclick', e => { e.preventDefault(); loop = false; loopStart = loopEnd = 0; clearRangeUI(); $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); status('已清除 LOOP 範圍'); if (playing) restartAtCurrentPosition(); });
+    frame.addEventListener('dblclick', event => {
+      event.preventDefault();
+      loopEnabled = false;
+      loopStart = 0;
+      loopEnd = 0;
+      offset = 0;
+      clearRangeUI();
+      $('loop').textContent = 'LOOP OFF';
+      $('loop').classList.remove('active');
+      setStatus('已清除 LOOP 範圍');
+      if (playing) restartPlaybackAtCurrentPosition();
+    });
   }
 
   function updateDeltaUI() {
-    document.querySelectorAll('[data-action="delta"]').forEach((b, idx) => { const on = deltaBand === idx + 1; b.classList.toggle('active', on); b.textContent = on ? 'DELTA ON' : 'DELTA'; });
-    if (deltaBand) bypassAll = false;
-    if (graph) syncGraph();
-    if (playing) { /* graph values update without rebuilding the source */ }
-    status(deltaBand ? `DELTA SECTION ${deltaBand}：只聽該頻帶 Wet−Dry 異動` : (buffer ? '音檔已載入。' : '尚未載入音檔。'));
+    document.querySelectorAll('[data-action="delta"]').forEach((button, index) => {
+      const selected = deltaBand === index + 1;
+      button.classList.toggle('active', selected);
+      button.textContent = selected ? 'DELTA ON' : 'DELTA';
+    });
+    if (deltaBand) globalBypass = false;
+    syncGraph();
+    setStatus(deltaBand ? `DELTA SECTION ${deltaBand}：只聽該頻帶 Wet−Dry 異動` : (buffer ? '音檔已載入。' : '尚未載入音檔。'));
   }
-  function toggleBypassAll() {
-    bypassAll = !bypassAll; if (bypassAll) deltaBand = 0;
-    $('bypassAll').textContent = bypassAll ? 'BYPASS ON' : 'BYPASS OFF'; $('bypassAll').classList.toggle('active', bypassAll);
+
+  function toggleGlobalBypass() {
+    globalBypass = !globalBypass;
+    if (globalBypass) deltaBand = 0;
+    $('bypassAll').textContent = globalBypass ? 'BYPASS ON' : 'BYPASS OFF';
+    $('bypassAll').classList.toggle('active', globalBypass);
     updateDeltaUI();
   }
+
   function toggleLoop() {
-    loop = !loop; if (!loop) { loopStart = loopEnd = 0; clearRangeUI(); } else if (buffer && loopEnd <= loopStart) { loopStart = 0; loopEnd = buffer.duration; drawSelection('in', 0, 1); drawSelection('out', 0, 1); }
-    $('loop').textContent = loop ? (loopEnd > loopStart ? `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s` : 'LOOP ON') : 'LOOP OFF'; $('loop').classList.toggle('active', loop); if (playing) restartAtCurrentPosition();
+    loopEnabled = !loopEnabled;
+    if (!loopEnabled) {
+      loopStart = 0;
+      loopEnd = 0;
+      clearRangeUI();
+    } else if (buffer && loopEnd <= loopStart) {
+      loopStart = 0;
+      loopEnd = buffer.duration;
+      drawSelection('in', 0, 1);
+      drawSelection('out', 0, 1);
+    }
+    $('loop').textContent = loopEnabled
+      ? (loopEnd > loopStart ? `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s` : 'LOOP ON')
+      : 'LOOP OFF';
+    $('loop').classList.toggle('active', loopEnabled);
+    if (playing) restartPlaybackAtCurrentPosition();
   }
-  function toggleAB() { saveSlot(); const other = slot === 'A' ? 'B' : 'A'; slot = other; applyData(other === 'A' ? slotA : slotB); $('ab').textContent = 'A/B · ' + slot; status('已切換到 Slot ' + slot); }
+
+  function toggleAB() {
+    saveABSlot();
+    abSlot = abSlot === 'A' ? 'B' : 'A';
+    applyBands(abSlot === 'A' ? slotA : slotB, false);
+    $('ab').textContent = 'A/B · ' + abSlot;
+    setStatus('已切換到 Slot ' + abSlot);
+  }
+
+  function bindKnobInput(input) {
+    input.addEventListener('input', () => {
+      renderKnob(input, true);
+      saveABSlot();
+      syncGraph();
+      scheduleProcessedRender();
+    });
+    input.addEventListener('change', () => renderKnob(input, false));
+  }
 
   function setupUI() {
+    document.querySelectorAll('.knob-input').forEach(input => {
+      bindKnobInput(input);
+      renderKnob(input, false);
+    });
+
     document.querySelectorAll('.knob').forEach(knob => {
-      const id = knob.dataset.target, input = $(id); let lastY = 0;
+      const id = knob.dataset.target;
+      const input = $(id);
+      let lastY = 0;
       knob.addEventListener('pointerenter', () => renderKnob(input, true));
       knob.addEventListener('pointerleave', () => { if (!knob.hasPointerCapture?.()) renderKnob(input, false); });
-      knob.addEventListener('pointerdown', e => { e.preventDefault(); lastY = e.clientY; knob.classList.add('active'); knob.setPointerCapture?.(e.pointerId); renderKnob(input, true); });
-      knob.addEventListener('pointermove', e => { if (!knob.hasPointerCapture?.(e.pointerId)) return; const key = id.replace(/[0-9]+$/, ''); setInput(input, Number(input.value) + (lastY - e.clientY) * knobDeltaPerPixel(key), true, true); lastY = e.clientY; });
-      const done = e => { try { knob.releasePointerCapture?.(e.pointerId); } catch (_) {} knob.classList.remove('active'); renderKnob(input, false); };
-      knob.addEventListener('pointerup', done); knob.addEventListener('pointercancel', done);
-      knob.addEventListener('wheel', e => { e.preventDefault(); const key = id.replace(/[0-9]+$/, ''); setInput(input, Number(input.value) + (e.deltaY < 0 ? 1 : -1) * knobDeltaPerPixel(key) * 6, true, true); }, { passive: false });
-      knob.addEventListener('dblclick', () => setInput(input, Number(input.defaultValue)));
+      knob.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        lastY = event.clientY;
+        knob.classList.add('active');
+        knob.setPointerCapture?.(event.pointerId);
+        renderKnob(input, true);
+      });
+      knob.addEventListener('pointermove', event => {
+        if (!knob.hasPointerCapture?.(event.pointerId)) return;
+        const key = id.replace(/\d+$/, '');
+        setInputValue(input, Number(input.value) + (lastY - event.clientY) * knobDeltaPerPixel(key), true, true);
+        lastY = event.clientY;
+      });
+      const finish = event => {
+        try { knob.releasePointerCapture?.(event.pointerId); } catch (_) {}
+        knob.classList.remove('active');
+        renderKnob(input, false);
+      };
+      knob.addEventListener('pointerup', finish);
+      knob.addEventListener('pointercancel', finish);
+      knob.addEventListener('wheel', event => {
+        event.preventDefault();
+        const key = id.replace(/\d+$/, '');
+        const direction = event.deltaY < 0 ? 1 : -1;
+        setInputValue(input, Number(input.value) + direction * knobDeltaPerPixel(key) * 6, true, true);
+      }, { passive: false });
+      knob.addEventListener('dblclick', () => setInputValue(input, Number(input.defaultValue), true, true));
     });
-    $('file').addEventListener('change', e => loadFile(e.target.files?.[0]));
-    $('dropUi').addEventListener('dragover', e => e.preventDefault()); $('dropUi').addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer?.files?.[0]); });
-    $('inputFrame').addEventListener('dragover', e => e.preventDefault()); $('inputFrame').addEventListener('drop', e => { e.preventDefault(); loadFile(e.dataTransfer?.files?.[0]); });
-    $('play').addEventListener('click', togglePlay); $('stop').addEventListener('click', stopPlayback); $('loop').addEventListener('click', toggleLoop); $('bypassAll').addEventListener('click', toggleBypassAll); $('ab').addEventListener('click', toggleAB);
-    $('sortBtn').addEventListener('click', sortBands); $('resetAll').addEventListener('click', resetAll); $('resetBands').addEventListener('click', resetAll);
+
+    $('file').addEventListener('change', event => loadFile(event.target.files?.[0]));
+    $('dropUi').addEventListener('dragover', event => event.preventDefault());
+    $('dropUi').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
+    $('inputFrame').addEventListener('dragover', event => event.preventDefault());
+    $('inputFrame').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
+
+    $('play').addEventListener('click', togglePlay);
+    $('stop').addEventListener('click', stopPlayback);
+    $('loop').addEventListener('click', toggleLoop);
+    $('bypassAll').addEventListener('click', toggleGlobalBypass);
+    $('ab').addEventListener('click', toggleAB);
+    $('sortBtn').addEventListener('click', sortBands);
+    $('resetAll').addEventListener('click', resetAll);
+    $('resetBands').addEventListener('click', resetAll);
+
     document.querySelectorAll('.band').forEach(card => {
-      const i = Number(card.dataset.band);
-      card.querySelector('[data-action="bypass"]').addEventListener('click', () => setBandBypass(i, !$('byp' + i).classList.contains('on')));
-      card.querySelector('[data-action="delta"]').addEventListener('click', () => { deltaBand = deltaBand === i ? 0 : i; updateDeltaUI(); });
-      card.querySelector('[data-action="reset"]').addEventListener('click', () => resetBand(i));
+      const index = Number(card.dataset.band);
+      card.querySelector('[data-action="bypass"]').addEventListener('click', () => {
+        setBandBypass(index, !$('byp' + index).classList.contains('on'));
+      });
+      card.querySelector('[data-action="delta"]').addEventListener('click', () => {
+        deltaBand = deltaBand === index ? 0 : index;
+        updateDeltaUI();
+      });
+      card.querySelector('[data-action="reset"]').addEventListener('click', () => resetBand(index));
     });
-    bindRange('in'); bindRange('out');
-    window.addEventListener('keydown', e => { if (e.code !== 'Space' || e.repeat) return; const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; e.preventDefault(); togglePlay(); });
-    window.addEventListener('resize', () => { if (buffer) { drawInputSpectrogram(); scheduleProcessedRender(); } });
-    document.querySelectorAll('.knob-input').forEach(renderKnob);
+
+    bindRange('in');
+    bindRange('out');
+
+    window.addEventListener('keydown', event => {
+      if (event.code !== 'Space' || event.repeat) return;
+      const target = event.target;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      event.preventDefault();
+      togglePlay();
+    });
+
+    window.addEventListener('resize', () => {
+      if (!buffer) return;
+      drawInputSpectrogram();
+      scheduleProcessedRender();
+    });
   }
 
-  window.myEFX = { loadFile, togglePlay, stopPlayback, currentData };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupUI, { once: true }); else setupUI();
+  function meterRms() {
+    if (!graph) return 0;
+    const data = new Float32Array(graph.analyser.fftSize);
+    graph.analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (const x of data) sum += x * x;
+    return Math.sqrt(sum / data.length);
+  }
+
+  function debugState() {
+    return {
+      loaded: Boolean(buffer),
+      playing,
+      loopEnabled,
+      globalBypass,
+      deltaBand,
+      loopStart,
+      loopEnd,
+      offset,
+      slot: abSlot,
+      graphReady: Boolean(graph),
+      bands: currentData()
+    };
+  }
+
+  window.myEFX = {
+    loadFile,
+    togglePlay,
+    stopPlayback,
+    currentData,
+    debugState,
+    meterRms
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupUI, { once: true });
+  else setupUI();
 })();
