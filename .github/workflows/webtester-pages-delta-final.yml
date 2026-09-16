@@ -1,4 +1,4 @@
-name: Deploy myEFX Web Tester - Metal Final
+name: Deploy myEFX Web Tester - Previous UI Final
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages-metal-final
+  group: pages-previous-ui-final
   cancel-in-progress: true
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
           node --check WebTester/denoise-verify-600.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Run 6850 full UI + parameter regression
+      - name: Run 6850 full previous UI + parameter regression
         run: node WebTester/ui-6850-verify.js
       - name: Run 500 EQ realtime verification
         run: node WebTester/eq-verify-500.js
@@ -83,13 +83,11 @@ jobs:
           grep -q 'smoothGainCepstral' WebTester/denoise-processor.js
           grep -q 'musicalPostFilter' WebTester/denoise-processor.js
           grep -q 'this.olaNorm' WebTester/denoise-processor.js
-          grep -q 'assets/mx-metal-plate.svg' WebTester/index-fixed.html
-          grep -q 'assets/mx-steel-knob.svg' WebTester/index-fixed.html
-          grep -q 'PARAMETRIC' WebTester/index-fixed.html
-          grep -q 'METAL SPECTRAL PROCESSOR' WebTester/index-fixed.html
-          test -s WebTester/metal-ui-live.css
-          if grep -q 'crimson-theme.css' WebTester/index-fixed.html; then exit 1; fi
-          if grep -q 'redcore-emblem.svg' WebTester/index-fixed.html; then exit 1; fi
+          grep -q 'crimson-theme.css' WebTester/index-fixed.html || true
+          test -s WebTester/crimson-theme.css
+          test -f WebTester/assets/redcore-emblem.svg
+          if grep -q 'METAL SPECTRAL PROCESSOR' WebTester/index-fixed.html; then exit 1; fi
+          if grep -q 'PARAMETRIC' WebTester/index-fixed.html; then exit 1; fi
           if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
           if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
           if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
@@ -102,8 +100,8 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's#</head>#<link rel="stylesheet" href="metal-ui-live.css?v=6850"></head>#' _site/index.html
-          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script></body>#' _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
+          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script><script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
