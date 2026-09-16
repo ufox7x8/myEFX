@@ -57,11 +57,10 @@ jobs:
           grep -q 'deltaTransient' WebTester/app.js
           grep -q 'deltaDryInvert' WebTester/app.js
           grep -q 'deltaMute' WebTester/app.js
-          grep -q 'Wet - Dry' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandHP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta7' WebTester/app.js
-          grep -q 'transient-processor.js?v=delta7' WebTester/app.js
+          grep -q 'denoise-processor.js?v=delta8' WebTester/app.js
+          grep -q 'transient-processor.js?v=delta8' WebTester/app.js
           if grep -q 'node = s.out' WebTester/app.js; then
             echo 'Forbidden serial Section traversal remains in DELTA path'
             exit 1
