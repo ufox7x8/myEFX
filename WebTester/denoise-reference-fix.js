@@ -1,0 +1,12 @@
+const fs = require('fs');
+const path = 'WebTester/denoise-processor.js';
+let s = fs.readFileSync(path, 'utf8');
+s = s.replace("    this.prevFlux = new Float32Array(this.B);", "    this.prevFlux = new Float32Array(this.B);\n    this.prevGamma = new Float32Array(this.B);");
+s = s.replace("      const xi = this.ddAlpha * this.prevGain[k] * this.prevGain[k] * this.prevGamma?.[k] + (1 - this.ddAlpha) * xiInst;\n      if (!this.prevGamma) this.prevGamma = new Float32Array(this.B);", "      const xi = this.ddAlpha * this.prevGain[k] * this.prevGain[k] * this.prevGamma[k] + (1 - this.ddAlpha) * xiInst;");
+s = s.replace("      this.prevGamma ??= new Float32Array(this.B);\n      this.prevGamma[k] = power[k] / Math.max(this.lambda[k], 1e-12);", "      this.prevGamma[k] = power[k] / Math.max(this.lambda[k], 1e-12);");
+s = s.replace("        const norm = 1 / 3.4;\n        for (let n = 0; n < this.H; n++) { this.emitL[n] *= norm; this.emitR[n] *= norm; }", "        for (let n = 0; n < this.H; n++) {\n          const idx = n;\n          const norm = this.olaNorm[idx];\n          this.emitL[n] /= norm;\n          this.emitR[n] /= norm;\n        }");
+if (!s.includes('this.prevGamma = new Float32Array(this.B);')) throw new Error('prevGamma init missing');
+if (s.includes('1 / 3.4')) throw new Error('fixed OLA gain remains');
+if (!s.includes('const norm = this.olaNorm[idx];')) throw new Error('OLA normalization fix missing');
+fs.writeFileSync(path, s, 'utf8');
+console.log('Applied denoise reference-port initialization + exact window^2 OLA normalization.');
