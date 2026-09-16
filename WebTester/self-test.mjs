@@ -9,6 +9,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const port = 4173;
 const failures = [];
 const fail = msg => failures.push(msg);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 function wavFile(filePath, sampleRate = 48000, seconds = 1.5) {
   const frames = Math.floor(sampleRate * seconds), bytes = frames * 2, buf = Buffer.alloc(44 + bytes);
@@ -18,7 +19,6 @@ function wavFile(filePath, sampleRate = 48000, seconds = 1.5) {
   for (let i = 0; i < frames; i++) { const t = i / sampleRate; const s = 0.25 * Math.sin(2 * Math.PI * 1000 * t) + 0.08 * Math.sin(2 * Math.PI * 440 * t); buf.writeInt16LE(Math.round(clamp(s, -1, 1) * 32767), 44 + i * 2); }
   fs.writeFileSync(filePath, buf);
 }
-const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 const server = http.createServer((req, res) => {
   let rel = decodeURIComponent((req.url || '/').split('?')[0]); if (rel === '/') rel = '/index-fixed.html';
@@ -33,14 +33,14 @@ page.on('pageerror', e => fail('PAGEERROR: ' + e.message)); page.on('console', m
 
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
-
   const stage1 = await page.evaluate(() => {
     const errors = [];
     for (let i = 0; i < 650; i++) {
       if (document.querySelectorAll('.knob').length !== 24) errors.push('knobs');
       if (document.querySelectorAll('.knob-input').length !== 24) errors.push('inputs');
       if (document.querySelectorAll('.band-byp').length !== 4) errors.push('bypass');
-      if (!document.querySelector('script[src$="/app-final.js?v=1"]')) errors.push('app-path');
+      const src = document.querySelector('script[src*="app-final.js"]')?.getAttribute('src') || '';
+      if (src !== 'app-final.js?v=1') errors.push('app-path');
       const d = window.myEFX?.currentData?.(); if (!d || d.length !== 4) errors.push('api');
       if (Math.abs((d?.[0]?.freq ?? 0) - 31.5) > .001 || d?.[1]?.freq !== 125 || d?.[2]?.freq !== 1000 || d?.[3]?.freq !== 8000) errors.push('defaults');
     }
@@ -48,8 +48,7 @@ try {
   });
   if (stage1.length) fail('STAGE1 ' + stage1.join(',')); else console.log('STAGE1 650 structural/path/wiring iterations: PASS');
 
-  await page.locator('#file').setInputFiles(wav);
-  await page.waitForFunction(() => window.myEFX?.debugState()?.loaded === true);
+  await page.locator('#file').setInputFiles(wav); await page.waitForFunction(() => window.myEFX?.debugState()?.loaded === true);
 
   const stage2 = await page.evaluate(() => {
     const inputs = [...document.querySelectorAll('.knob-input')], errors = [];
@@ -74,8 +73,7 @@ try {
   if (!play.s.graphReady || !play.s.playing || play.rms <= 1e-5) fail('playback failed: ' + JSON.stringify(play));
 
   const stage3 = await page.evaluate(() => {
-    const errors = [];
-    const all = sel => document.querySelectorAll(sel);
+    const errors = [], all = sel => document.querySelectorAll(sel);
     for (let i = 0; i < 480; i++) {
       if (i % 4 === 0 || i % 4 === 1) document.querySelector('#bypassAll').click();
       if (i % 7 === 0) all('[data-action="delta"]')[i % 4].click();
@@ -85,7 +83,7 @@ try {
       if (i % 19 === 0) all('[data-action="reset"]')[i % 4].click();
       if (i % 23 === 0) document.querySelector('#ab').click();
       if (i % 29 === 0) document.querySelector('#resetBands').click();
-      const s = window.myEFX.debugState(); if (s.bands.length !== 4 || !s.graphReady || !['ScriptProcessor'].includes(s.graphMode)) errors.push('graph/state');
+      const s = window.myEFX.debugState(); if (s.bands.length !== 4 || !s.graphReady || s.graphMode !== 'ScriptProcessor') errors.push('graph/state');
     }
     return [...new Set(errors)];
   });
