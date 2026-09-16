@@ -64,9 +64,12 @@ jobs:
           grep -q 's.eq.frequency.setTargetAtTime(freq, now, .0015)' WebTester/app.js
           grep -q 's.eq.Q.setTargetAtTime(q, now, .0015)' WebTester/app.js
           grep -q 's.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .0015)' WebTester/app.js
-          grep -q 'function drawProcessedSpectrogram' WebTester/app.js
-          grep -q 'drawProcessedSpectrogram(out, buffer)' WebTester/app.js
-          grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
+          grep -q 'function ensureProcessedAnalyser' WebTester/app.js
+          grep -q 'function startProcessedPreview' WebTester/app.js
+          grep -q 'function scheduleProcessedRender' WebTester/app.js
+          grep -q 'runProcessedLive();' WebTester/app.js
+          if grep -q 'new OfflineAudioContext' WebTester/app.js; then exit 1; fi
+          if grep -q 'await c.startRendering()' WebTester/app.js; then exit 1; fi
           grep -q 'this.clamp(rawAmount / 100, 0.01, 0.99)' WebTester/denoise-processor.js
           grep -q 'dryL \* (1 - amount) + fullStrengthL\[n\] \* amount' WebTester/denoise-processor.js
           grep -q 'dryR \* (1 - amount) + fullStrengthR\[n\] \* amount' WebTester/denoise-processor.js
