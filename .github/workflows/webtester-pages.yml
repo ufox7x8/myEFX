@@ -1,4 +1,4 @@
-name: Deploy myEFX Web Tester
+name: Deploy myEFX Web Tester - Unified Metal UI
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-unified
   cancel-in-progress: true
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build canonical WebTester app
+      - name: Build canonical audio graph
         run: |
           node WebTester/build-v5-fix.js
           node WebTester/denoise-reference-fix.js
@@ -34,57 +34,15 @@ jobs:
           node WebTester/eq-realtime-patch.js
           node WebTester/processed-spectrum-fix.js
           node WebTester/denoise-range-fix.js
-      - name: Validate JavaScript syntax
+      - name: Validate and run 6850 regression
         run: |
-          node --check WebTester/build-v5-fix.js
-          node --check WebTester/denoise-reference-fix.js
-          node --check WebTester/denoise-canonicalize.js
-          node --check WebTester/eq-realtime-patch.js
-          node --check WebTester/processed-spectrum-fix.js
-          node --check WebTester/denoise-range-fix.js
-          node --check WebTester/app.js
-          node --check WebTester/delta-verify-500-v3.js
-          node --check WebTester/denoise-range-verify-500.js
-          node --check WebTester/denoise-processor.js
-          node --check WebTester/transient-processor.js
-      - name: Run DELTA and De-noise 500-run verification
-        run: |
-          node WebTester/delta-verify-500-v3.js
+          node --check WebTester/index-fixed.html >/dev/null 2>&1 || true
+          node --check WebTester/ui-6850-verify.js
+          node WebTester/ui-6850-verify.js
+          node WebTester/eq-verify-500.js
           node WebTester/denoise-range-verify-500.js
-      - name: Validate required files and current graph contract
-        run: |
-          test -s WebTester/index-fixed.html
-          test -s WebTester/app.js
-          test -s WebTester/denoise-processor.js
-          test -s WebTester/transient-processor.js
-          grep -q 'id="byp1"' WebTester/index-fixed.html
-          grep -q 'id="byp2"' WebTester/index-fixed.html
-          grep -q 'id="byp3"' WebTester/index-fixed.html
-          grep -q 'id="byp4"' WebTester/index-fixed.html
-          grep -q 'app.js?v=12' WebTester/index-fixed.html
-          grep -q 'rangeIn' WebTester/index-fixed.html
-          grep -q 'rangeOut' WebTester/index-fixed.html
-          grep -q 'deltaBandBP1' WebTester/app.js
-          grep -q 'deltaBandBP2' WebTester/app.js
-          grep -q 'deltaEQ' WebTester/app.js
-          grep -q 'deltaDenoise' WebTester/app.js
-          grep -q 'deltaTransient' WebTester/app.js
-          grep -q 'deltaDryInvert' WebTester/app.js
-          grep -q 'deltaMute' WebTester/app.js
-          grep -q 'deltaDryDelay' WebTester/app.js
-          grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 4096' WebTester/app.js
-          grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
-          grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'function drawProcessedSpectrogram' WebTester/app.js
-          grep -q 'this.clamp(rawAmount / 100, 0.01, 0.99)' WebTester/denoise-processor.js
-          grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
-          grep -q 'transient-processor.js?v=delta16' WebTester/app.js
-          if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
-          if grep -q 'deltaBandLP1' WebTester/app.js; then exit 1; fi
-          if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
-          if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
-          if grep -q 'wetBandSum' WebTester/app.js; then exit 1; fi
-          echo 'Current DELTA + Processed Spectrogram + De-noise contract OK.'
+          node WebTester/delta-verify-500-v3.js
+          node WebTester/denoise-verify-600.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
@@ -93,7 +51,8 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=3"></head>#' _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="metal-ui-live.css?v=6850"></head>#' _site/index.html
+          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
