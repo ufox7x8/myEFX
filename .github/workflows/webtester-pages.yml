@@ -1,4 +1,4 @@
-name: Deploy myEFX Web Tester - Unified Metal UI
+name: Deploy myEFX Web Tester - Previous UI
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages-unified
+  group: pages-previous-ui
   cancel-in-progress: true
 
 jobs:
@@ -34,9 +34,8 @@ jobs:
           node WebTester/eq-realtime-patch.js
           node WebTester/processed-spectrum-fix.js
           node WebTester/denoise-range-fix.js
-      - name: Validate and run 6850 regression
+      - name: Validate and run previous UI 6850 regression
         run: |
-          node --check WebTester/index-fixed.html >/dev/null 2>&1 || true
           node --check WebTester/ui-6850-verify.js
           node WebTester/ui-6850-verify.js
           node WebTester/eq-verify-500.js
@@ -51,8 +50,8 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's#</head>#<link rel="stylesheet" href="metal-ui-live.css?v=6850"></head>#' _site/index.html
-          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script></body>#' _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
+          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script><script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
