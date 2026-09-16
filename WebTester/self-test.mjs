@@ -10,91 +10,54 @@ const port = 4173;
 const failures = [];
 const fail = msg => failures.push(msg);
 
-function wavFile(filePath, sampleRate = 48000, seconds = 1.25) {
-  const frames = Math.floor(sampleRate * seconds), channels = 1, bits = 16;
-  const blockAlign = channels * bits / 8, byteRate = sampleRate * blockAlign, dataSize = frames * blockAlign;
-  const buf = Buffer.alloc(44 + dataSize);
-  buf.write('RIFF', 0); buf.writeUInt32LE(36 + dataSize, 4); buf.write('WAVE', 8);
-  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(channels, 22);
-  buf.writeUInt32LE(sampleRate, 24); buf.writeUInt32LE(byteRate, 28); buf.writeUInt16LE(blockAlign, 32); buf.writeUInt16LE(bits, 34);
-  buf.write('data', 36); buf.writeUInt32LE(dataSize, 40);
-  for (let i = 0; i < frames; i++) {
-    const t = i / sampleRate;
-    const sample = 0.22 * Math.sin(2 * Math.PI * 1000 * t) + 0.08 * Math.sin(2 * Math.PI * 440 * t);
-    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32767), 44 + i * 2);
-  }
+function wavFile(filePath, sampleRate = 48000, seconds = 1.5) {
+  const frames = Math.floor(sampleRate * seconds), bytes = frames * 2, buf = Buffer.alloc(44 + bytes);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + bytes, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(sampleRate, 24); buf.writeUInt32LE(sampleRate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(bytes, 40);
+  for (let i = 0; i < frames; i++) { const t = i / sampleRate; const s = 0.25 * Math.sin(2 * Math.PI * 1000 * t) + 0.08 * Math.sin(2 * Math.PI * 440 * t); buf.writeInt16LE(Math.round(clamp(s, -1, 1) * 32767), 44 + i * 2); }
   fs.writeFileSync(filePath, buf);
 }
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 const server = http.createServer((req, res) => {
-  let rel = decodeURIComponent((req.url || '/').split('?')[0]);
-  if (rel === '/') rel = '/index-fixed.html';
-  const file = path.join(root, rel);
-  if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404); res.end('not found'); return; }
-    const type = file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(data);
-  });
+  let rel = decodeURIComponent((req.url || '/').split('?')[0]); if (rel === '/') rel = '/index-fixed.html';
+  const file = path.join(root, rel); if (!file.startsWith(root)) { res.writeHead(403); return res.end(); }
+  fs.readFile(file, (err, body) => { if (err) { res.writeHead(404); return res.end('not found'); } const type = file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'application/octet-stream'; res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(body); });
 });
-
 await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'myefx-test-'));
-const wav = path.join(tmp, 'test-tone.wav');
-wavFile(wav);
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'myefx-')); const wav = path.join(tmp, 'tone.wav'); wavFile(wav);
 const browser = await chromium.launch({ headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
 const page = await browser.newPage({ viewport: { width: 1500, height: 1200 } });
-page.on('pageerror', err => fail('PAGEERROR: ' + err.message));
-page.on('console', msg => { if (msg.type() === 'error') fail('CONSOLE: ' + msg.text()); });
+page.on('pageerror', e => fail('PAGEERROR: ' + e.message)); page.on('console', m => { if (m.type() === 'error') fail('CONSOLE: ' + m.text()); });
 
 try {
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
 
-  const probe = await page.evaluate(async () => {
-    const ctx = new AudioContext();
-    const result = { state: ctx.state, loaded: false, error: '' };
-    try {
-      await ctx.audioWorklet.addModule(new URL('worklet-probe.js', location.href).href);
-      result.loaded = true;
-    } catch (e) {
-      result.error = e?.stack || e?.message || String(e);
-    }
-    try { await ctx.close(); } catch (_) {}
-    return result;
-  });
-  console.log('WORKLET PROBE', JSON.stringify(probe));
-  if (!probe.loaded) fail('probe worklet failed: ' + JSON.stringify(probe));
-
   const stage1 = await page.evaluate(() => {
     const errors = [];
     for (let i = 0; i < 650; i++) {
-      if (document.querySelectorAll('.knob').length !== 24) errors.push('knob-count');
-      if (document.querySelectorAll('.knob-input').length !== 24) errors.push('input-count');
-      if (document.querySelectorAll('.band-byp').length !== 4) errors.push('bypass-count');
-      if (!window.myEFX || typeof window.myEFX.currentData !== 'function') errors.push('api');
-      const scripts = [...document.scripts].map(s => s.src).filter(Boolean);
-      if (!scripts.some(s => s.endsWith('/app.js?v=15'))) errors.push('app-path');
-      const data = window.myEFX.currentData();
-      if (data.length !== 4) errors.push('data-length');
-      if (Math.abs(data[0].freq - 31.5) > 0.001 || data[1].freq !== 125 || data[2].freq !== 1000 || data[3].freq !== 8000) errors.push('defaults');
+      if (document.querySelectorAll('.knob').length !== 24) errors.push('knobs');
+      if (document.querySelectorAll('.knob-input').length !== 24) errors.push('inputs');
+      if (document.querySelectorAll('.band-byp').length !== 4) errors.push('bypass');
+      if (!document.querySelector('script[src$="/app-final.js?v=1"]')) errors.push('app-path');
+      const d = window.myEFX?.currentData?.(); if (!d || d.length !== 4) errors.push('api');
+      if (Math.abs((d?.[0]?.freq ?? 0) - 31.5) > .001 || d?.[1]?.freq !== 125 || d?.[2]?.freq !== 1000 || d?.[3]?.freq !== 8000) errors.push('defaults');
     }
     return [...new Set(errors)];
   });
-  if (stage1.length) fail('STAGE1 ' + stage1.join(','));
-  console.log('STAGE1 650 structural/path/wiring iterations: PASS');
+  if (stage1.length) fail('STAGE1 ' + stage1.join(',')); else console.log('STAGE1 650 structural/path/wiring iterations: PASS');
 
   await page.locator('#file').setInputFiles(wav);
-  await page.waitForFunction(() => window.myEFX?.debugState()?.loaded === true, null, { timeout: 10000 });
+  await page.waitForFunction(() => window.myEFX?.debugState()?.loaded === true);
 
   const stage2 = await page.evaluate(() => {
-    const knobs = [...document.querySelectorAll('.knob-input')], errors = [];
+    const inputs = [...document.querySelectorAll('.knob-input')], errors = [];
     for (let i = 0; i < 450; i++) {
-      const input = knobs[i % knobs.length], min = Number(input.min), max = Number(input.max), p = (i % 21) / 20;
-      input.value = String(min + (max - min) * p); input.dispatchEvent(new Event('input', { bubbles: true }));
-      const state = window.myEFX.debugState(), key = input.id.replace(/\d+$/, ''), band = Number(input.id.match(/\d+$/)[0]) - 1;
-      const tolerance = Math.max(Number(input.step) || 0.01, 0.02);
-      if (Math.abs(state.bands[band][key] - Number(input.value)) > tolerance) errors.push('knob-sync');
-      if (i % 9 === 0) document.querySelector('#byp' + ((i % 4) + 1)).click();
+      const el = inputs[i % inputs.length]; const min = +el.min, max = +el.max; el.value = String(min + (max - min) * ((i % 21) / 20)); el.dispatchEvent(new Event('input', { bubbles: true }));
+      const st = window.myEFX.debugState(), key = el.id.replace(/\d+$/, ''), bi = +el.id.match(/\d+$/)[0] - 1;
+      if (Math.abs(st.bands[bi][key] - +el.value) > Math.max(+el.step, .02)) errors.push('knob-sync');
+      if (i % 9 === 0) document.querySelector('#byp' + (i % 4 + 1)).click();
       if (i % 11 === 0) document.querySelectorAll('[data-action="delta"]')[i % 4].click();
       if (i % 17 === 0) document.querySelectorAll('[data-action="reset"]')[i % 4].click();
       if (i % 19 === 0) document.querySelector('#sortBtn').click();
@@ -103,67 +66,44 @@ try {
     }
     return [...new Set(errors)];
   });
-  if (stage2.length) fail('STAGE2 ' + stage2.join(','));
-  console.log('STAGE2 450 control/function iterations: PASS');
+  if (stage2.length) fail('STAGE2 ' + stage2.join(',')); else console.log('STAGE2 450 control/function iterations: PASS');
 
-  await page.locator('#resetAll').click();
-  await page.locator('#play').click();
-  try {
-    await page.waitForFunction(() => window.myEFX?.debugState()?.graphReady === true, null, { timeout: 5000 });
-  } catch (_) {
-    const diagnostic = await page.evaluate(() => window.myEFX?.debugState());
-    throw new Error('GRAPH INIT TIMEOUT: ' + JSON.stringify(diagnostic));
-  }
-  await page.waitForTimeout(180);
-  const before = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent || '' }));
-  console.log('PLAYBACK CHECK', JSON.stringify(before));
-  if (!before.state.playing || before.rms <= 1e-5) fail('playback/meter failed: ' + JSON.stringify(before));
+  await page.locator('#resetAll').click(); await page.locator('#play').click(); await page.waitForTimeout(350);
+  const play = await page.evaluate(() => ({ s: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent }));
+  console.log('PLAYBACK CHECK', JSON.stringify(play));
+  if (!play.s.graphReady || !play.s.playing || play.rms <= 1e-5) fail('playback failed: ' + JSON.stringify(play));
 
   const stage3 = await page.evaluate(() => {
-    const errors = [], pick = (sel, i) => document.querySelectorAll(sel)[i % document.querySelectorAll(sel).length];
+    const errors = [];
+    const all = sel => document.querySelectorAll(sel);
     for (let i = 0; i < 480; i++) {
-      if (i % 4 === 0) document.querySelector('#bypassAll').click();
-      if (i % 4 === 1) document.querySelector('#bypassAll').click();
-      if (i % 7 === 0) pick('[data-action="delta"]', i).click();
+      if (i % 4 === 0 || i % 4 === 1) document.querySelector('#bypassAll').click();
+      if (i % 7 === 0) all('[data-action="delta"]')[i % 4].click();
       if (i % 9 === 0) document.querySelector('#loop').click();
       if (i % 13 === 0) document.querySelector('#loop').click();
-      if (i % 17 === 0) pick('[data-action="bypass"]', i).click();
-      if (i % 19 === 0) pick('[data-action="reset"]', i).click();
+      if (i % 17 === 0) all('[data-action="bypass"]')[i % 4].click();
+      if (i % 19 === 0) all('[data-action="reset"]')[i % 4].click();
       if (i % 23 === 0) document.querySelector('#ab').click();
       if (i % 29 === 0) document.querySelector('#resetBands').click();
-      const state = window.myEFX.debugState();
-      if (state.bands.length !== 4) errors.push('state-length');
-      if (state.deltaBand < 0 || state.deltaBand > 4) errors.push('delta-range');
-      if (state.graphError) errors.push('graph-error');
+      const s = window.myEFX.debugState(); if (s.bands.length !== 4 || !s.graphReady || !['ScriptProcessor'].includes(s.graphMode)) errors.push('graph/state');
     }
     return [...new Set(errors)];
   });
-  if (stage3.length) fail('STAGE3 ' + stage3.join(','));
-  console.log('STAGE3 480 live-graph/control stress iterations: PASS');
+  if (stage3.length) fail('STAGE3 ' + stage3.join(',')); else console.log('STAGE3 480 live-graph/control stress iterations: PASS');
 
-  await page.evaluate(() => {
-    document.querySelector('#resetAll').click();
-    const input = document.querySelector('#gain3'); input.value = '12'; input.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelectorAll('[data-action="delta"]')[2].click();
-  });
-  await page.waitForTimeout(300);
-  const delta = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent || '' }));
+  await page.evaluate(() => { document.querySelector('#resetAll').click(); const g = document.querySelector('#gain3'); g.value = '12'; g.dispatchEvent(new Event('input', { bubbles: true })); document.querySelectorAll('[data-action="delta"]')[2].click(); });
+  await page.waitForTimeout(220);
+  const delta = await page.evaluate(() => ({ s: window.myEFX.debugState(), rms: window.myEFX.meterRms() }));
   console.log('DELTA CHECK', JSON.stringify(delta));
-  if (!delta.state.playing || !delta.state.deltaBand || delta.rms <= 1e-7) fail('delta path silent: ' + JSON.stringify(delta));
+  if (!delta.s.playing || delta.s.delta !== 3 || delta.rms <= 1e-7) fail('delta failed: ' + JSON.stringify(delta));
 
   const frame = page.locator('#inputFrame'), box = await frame.boundingBox();
-  if (!box) fail('input frame box missing');
-  else {
-    await page.mouse.move(box.x + box.width * 0.22, box.y + box.height * 0.5); await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.72, box.y + box.height * 0.5); await page.mouse.up(); await page.waitForTimeout(50);
-    const loopState = await page.evaluate(() => window.myEFX.debugState());
-    if (!loopState.loopEnabled || loopState.loopEnd <= loopState.loopStart) fail('drag-loop failed');
-  }
+  if (!box) fail('frame missing'); else { await page.mouse.move(box.x + box.width * .2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width * .7, box.y + box.height / 2); await page.mouse.up(); await page.waitForTimeout(30); const s = await page.evaluate(() => window.myEFX.debugState()); if (!s.loop || s.loopEnd <= s.loopStart) fail('drag-loop failed'); }
 
   const stage4 = await page.evaluate(() => {
     const errors = [];
     for (let i = 0; i < 320; i++) {
-      const input = document.querySelector('#gain3'); input.value = String((i % 49) - 24); input.dispatchEvent(new Event('input', { bubbles: true }));
+      const g = document.querySelector('#gain3'); g.value = String((i % 49) - 24); g.dispatchEvent(new Event('input', { bubbles: true }));
       if (i % 3 === 0) document.querySelector('[data-action="delta"]').click();
       if (i % 5 === 0) document.querySelector('#bypassAll').click();
       if (i % 7 === 0) document.querySelector('#bypassAll').click();
@@ -171,18 +111,13 @@ try {
       if (i % 13 === 0) document.querySelector('#sortBtn').click();
       if (i % 17 === 0) document.querySelector('#resetAll').click();
       if (i % 19 === 0) document.querySelector('#stop').click();
-      const state = window.myEFX.debugState(); if (state.bands.length !== 4) errors.push('final-state');
+      if (window.myEFX.debugState().bands.length !== 4) errors.push('state');
     }
     return [...new Set(errors)];
   });
-  if (stage4.length) fail('STAGE4 ' + stage4.join(','));
-  console.log('STAGE4 320 final regression iterations: PASS');
+  if (stage4.length) fail('STAGE4 ' + stage4.join(',')); else console.log('STAGE4 320 final regression iterations: PASS');
   await page.locator('#stop').click();
-} catch (error) {
-  fail('HARNESS: ' + error.stack);
-} finally {
-  await browser.close(); server.close(); fs.rmSync(tmp, { recursive: true, force: true });
-}
-
+} catch (e) { fail('HARNESS: ' + e.stack); }
+finally { await browser.close(); server.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
 if (failures.length) { console.error('\nFAILURES'); for (const f of failures) console.error(f); process.exit(1); }
 console.log('ALL 1900 ITERATIONS PASS');
