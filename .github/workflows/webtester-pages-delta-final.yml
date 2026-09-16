@@ -32,6 +32,7 @@ jobs:
           node WebTester/denoise-canonicalize.js
           node WebTester/eq-realtime-patch.js
           node WebTester/processed-spectrum-fix.js
+          node WebTester/transient-isolation-fix.js
           node WebTester/denoise-range-fix.js
       - name: Validate JavaScript syntax
         run: |
@@ -40,6 +41,7 @@ jobs:
           node --check WebTester/denoise-canonicalize.js
           node --check WebTester/eq-realtime-patch.js
           node --check WebTester/processed-spectrum-fix.js
+          node --check WebTester/transient-isolation-fix.js
           node --check WebTester/denoise-range-fix.js
           node --check WebTester/ui-6850-verify.js
           node --check WebTester/denoise-range-verify-500.js
@@ -79,6 +81,11 @@ jobs:
           grep -q 'deltaBand.connect(deltaEQ)' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
+          grep -q 'trSum.connect(trBand)' WebTester/app.js
+          grep -q 'trBand.connect(delta)' WebTester/app.js
+          grep -q 's.trBand.frequency.setTargetAtTime(b.freq, now, .004)' WebTester/app.js
+          grep -q 's.trBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004)' WebTester/app.js
+          if grep -q 'trSum.connect(delta)' WebTester/app.js; then exit 1; fi
           grep -q 'this.N = 4096' WebTester/denoise-processor.js
           grep -q 'this.H = 512' WebTester/denoise-processor.js
           grep -q 'this.alphaS = 0.90' WebTester/denoise-processor.js
