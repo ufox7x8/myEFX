@@ -1,0 +1,38 @@
+name: myEFX DELTA 600x Linearity Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'WebTester/app.js'
+      - 'WebTester/build-v5-fix.js'
+      - 'WebTester/linearize-denoise.js'
+      - 'WebTester/delta-linearity-600.js'
+      - 'WebTester/denoise-processor.js'
+      - 'WebTester/transient-processor.js'
+      - '.github/workflows/delta-linearity-600.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  delta-linearity-600:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Build and linearize processors
+        run: |
+          node WebTester/build-v5-fix.js
+          node WebTester/linearize-denoise.js
+      - name: Syntax check
+        run: |
+          node --check WebTester/build-v5-fix.js
+          node --check WebTester/linearize-denoise.js
+          node --check WebTester/delta-linearity-600.js
+          node --check WebTester/app.js
+          node --check WebTester/denoise-processor.js
+          node --check WebTester/transient-processor.js
+      - name: Run exact 600-point linearity tests
+        run: node WebTester/delta-linearity-600.js
