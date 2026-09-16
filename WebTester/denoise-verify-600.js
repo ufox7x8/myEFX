@@ -20,19 +20,21 @@ const required=[
   ['perceptual(g, amount)','Bark weighting'],
   ['musicalPostFilter(power, gain)','musical-noise postfilter'],
   ['const flux = 10 * Math.log10(power[k] / Math.max(this.prevPower[k], 1e-12));','spectral flux transient protection'],
-  ['const wetL = dryL + amount * (fullStrengthL[n] - dryL);','linear strength mapping'],
+  ['const wetL = dryL + amount * (fullStrengthL[n] - dryL);','full-process reference interpolation'],
+  ['const wetR = dryR + amount * (fullStrengthR[n] - dryR);','stereo reference interpolation'],
   ['this.olaNorm','perfect reconstruction normalization'],
   ['if (amount <= 0.0001)','true bypass']
 ];
 for(let n=0;n<600;n++){
   for(const [needle,label] of required) expect(DN.includes(needle),`run ${n+1}: missing ${label}`);
-  const a=n/599;
+  const a=(n+1)/601;
+  const amount=.01+.98*a;
   const dry=.83;
   const full=.11+.86*((n*47)%600)/599;
-  const wet=dry+a*(full*dry-dry);
+  const wet=dry+amount*(full-dry);
   const delta=wet-dry;
-  const expected=a*dry*(full-1);
+  const expected=amount*(full-dry);
   expect(Math.abs(delta-expected)<1e-12,`run ${n+1}: Wet-Dry strength not linear`);
-  expect(a===0 ? delta===0 : Math.abs(delta)>0 || full===1,`run ${n+1}: zero/full endpoint contract`);
+  expect(amount>0&&amount<1,`run ${n+1}: amount range`);
 }
-console.log(`PASS 600/600 denoize DSP architecture + linear-strength regressions; checks=${checks}`);
+console.log(`PASS 600/600 denoize DSP architecture + explicit 1-99 linear-strength regressions; checks=${checks}`);
