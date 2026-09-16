@@ -2,29 +2,102 @@ const fs = require('fs');
 const APP = fs.readFileSync('WebTester/app.js', 'utf8');
 let checks = 0;
 function expect(v, label) { checks++; if (!v) throw new Error(label); }
+
+// RBJ-style band-pass magnitude check. This is used only as an architectural
+// regression test: for a Section's own FREQ/Q filter, the center frequency must
+// dominate frequencies far outside that Section's Q-defined band.
+function bandpassMagnitude(freq, center, q, sampleRate = 48000) {
+  const w0 = 2 * Math.PI * center / sampleRate;
+  const alpha = Math.sin(w0) / (2 * q);
+  const cosw = Math.cos(w0);
+  const sinw = Math.sin(w0);
+  const b0 = alpha, b1 = 0, b2 = -alpha;
+  const a0 = 1 + alpha, a1 = -2 * cosw, a2 = 1 - alpha;
+  const w = 2 * Math.PI * freq / sampleRate;
+  const c = Math.cos(w), s = Math.sin(w);
+  const nr = b0 + b1 * c + b2 * Math.cos(2*w);
+  const ni = -(b1 * s + b2 * Math.sin(2*w));
+  const dr = a0 + a1 * c + a2 * Math.cos(2*w);
+  const di = -(a1 * s + a2 * Math.sin(2*w));
+  return Math.hypot(nr, ni) / Math.hypot(dr, di);
+}
+
 function once(run) {
-  for (const n of ['deltaBandHP1','deltaBandHP2','deltaBandLP1','deltaBandLP2','deltaEQ','deltaDenoise','deltaTransient','deltaDryInvert','deltaMute','deltaDryDelay']) expect(APP.includes(n), `run ${run}: missing ${n}`);
+  // Two cascaded Bandpass filters: the first DSP operation is each Section's own FREQ/Q solo.
+  for (const n of ['deltaBandBP1','deltaBandBP2']) expect(APP.includes(n), `run ${run}: missing ${n}`);
+  expect(!APP.includes('deltaBandHP1') && !APP.includes('deltaBandLP1'), `run ${run}: old HP/LP crossover isolation remains`);
+  expect(!APP.includes('boundaries = new Map'), `run ${run}: inter-Section crossover calculation remains`);
+
+  for (const n of ['deltaEQ','deltaDenoise','deltaTransient','deltaDryInvert','deltaDryDelay','deltaMute']) expect(APP.includes(n), `run ${run}: missing ${n}`);
   expect(APP.includes('DELTA_DENOISE_LATENCY_SAMPLES = 1024'), `run ${run}: missing latency constant`);
   expect(APP.includes('const denoiseActive = !b.bypass && Number(b.denoise) > 0;'), `run ${run}: missing dynamic latency gate`);
   expect(APP.includes('const latencySamples = denoiseActive ? DELTA_DENOISE_LATENCY_SAMPLES : 0;'), `run ${run}: missing dynamic latency selection`);
   expect(APP.includes('s.deltaDryDelay.delayTime.setTargetAtTime(latencySamples / ctx.sampleRate'), `run ${run}: missing runtime latency alignment`);
 
-  const a=APP.indexOf('function connectPlayback()'), b=APP.indexOf('function restartAtCurrentPosition()',a);
-  expect(a>=0&&b>a,`run ${run}: playback boundaries`);
-  const fn=APP.slice(a,b), da=fn.indexOf('if (deltaBand) {'), db=fn.indexOf('let node = source;',da);
-  expect(da>=0&&db>da,`run ${run}: DELTA branch boundary`);
-  const d=fn.slice(da,db);
-  for (const n of ['for (const stage of graph.stages)','stage.deltaMute.disconnect(graph.master)','const selected = graph.stages[deltaBand - 1]','source.connect(selected.deltaBandHP1)','selected.deltaMute.connect(graph.master)','return;']) expect(d.includes(n),`run ${run}: missing ${n}`);
-  for (const n of ['node = s.out','node.connect(s.eq)','node.connect(s.split)','deltaBand - 1; i++','graph.stages[i].out']) expect(!d.includes(n),`run ${run}: cross-section route ${n}`);
+  // FREQ and Q must be the first DELTA parameterization for BOTH isolation stages.
+  expect(APP.includes('s.deltaBandBP1.frequency.setTargetAtTime(freq, now, .004);'), `run ${run}: BP1 frequency not locked to Section FREQ`);
+  expect(APP.includes('s.deltaBandBP1.Q.setTargetAtTime(q, now, .004);'), `run ${run}: BP1 Q not locked to Section Q`);
+  expect(APP.includes('s.deltaBandBP2.frequency.setTargetAtTime(freq, now, .004);'), `run ${run}: BP2 frequency not locked to Section FREQ`);
+  expect(APP.includes('s.deltaBandBP2.Q.setTargetAtTime(q, now, .004);'), `run ${run}: BP2 Q not locked to Section Q`);
+  expect(APP.includes('s.deltaEQ.frequency.setTargetAtTime(freq, now, .004);'), `run ${run}: DELTA EQ frequency mismatch`);
+  expect(APP.includes('s.deltaEQ.Q.setTargetAtTime(q, now, .004);'), `run ${run}: DELTA EQ Q mismatch`);
 
-  // All four possible DELTA selections must isolate exactly one Section.
-  // Use a very small 0.1% processing difference so the expected delta is explicitly small.
-  const dry=[[1,2,3,4],[2,2,2,2],[3,4,5,6],[4,4,4,4]];
-  for(let s=0;s<4;s++){
-    const diff=dry.map((x,i)=>i===s?x.map(v=>v*.999-v):x.map(()=>0));
-    for(let i=0;i<4;i++) for(const v of diff[i]) expect(i===s||v===0,`run ${run}: Section ${i+1} leaked when ${s+1} selected`);
-    const peak=Math.max(...diff[s].map(Math.abs)); expect(peak>0&&peak<.01,`run ${run}: bad delta peak ${peak}`);
+  const a = APP.indexOf('function createStage(c) {');
+  const b = APP.indexOf('\n\n  async function ensureGraph()', a);
+  expect(a >= 0 && b > a, `run ${run}: createStage boundary`);
+  const stage = APP.slice(a, b);
+  const bp = stage.indexOf('deltaBandBP1.connect(deltaBandBP2);');
+  const split = stage.indexOf('deltaBand.connect(deltaDry);', bp);
+  const proc = stage.indexOf('deltaEQ.connect(deltaDenoiseIn);', split);
+  expect(bp >= 0 && split > bp && proc > split, `run ${run}: wrong DELTA graph order`);
+  expect(!stage.slice(0, bp).includes('deltaEQ.connect') && !stage.slice(0, bp).includes('deltaDenoise'), `run ${run}: processing occurs before FREQ/Q isolation`);
+
+  // Selected Section is the ONLY graph branch allowed to reach master.
+  const pa = APP.indexOf('function connectPlayback()');
+  const pb = APP.indexOf('\n\n  function restartAtCurrentPosition()', pa);
+  expect(pa >= 0 && pb > pa, `run ${run}: playback boundaries`);
+  const fn = APP.slice(pa, pb);
+  const da = fn.indexOf('if (deltaBand) {');
+  const db = fn.indexOf('let node = source;', da);
+  expect(da >= 0 && db > da, `run ${run}: DELTA branch boundary`);
+  const delta = fn.slice(da, db);
+  for (const n of [
+    'for (const stage of graph.stages)',
+    'stage.deltaMute.disconnect(graph.master)',
+    'const selected = graph.stages[deltaBand - 1]',
+    'source.connect(selected.deltaBandBP1)',
+    'selected.deltaMute.connect(graph.master)',
+    'return;'
+  ]) expect(delta.includes(n), `run ${run}: missing ${n}`);
+  for (const n of ['node = s.out','node.connect(s.eq)','node.connect(s.split)','deltaBand - 1; i++','graph.stages[i].out']) expect(!delta.includes(n), `run ${run}: cross-Section route ${n}`);
+
+  // Four independent Q-defined SOLO tests. Each selected Section is tiny-band-only.
+  const cases = [
+    { f: 31.5, q: 1 },
+    { f: 125, q: 4 },
+    { f: 2000, q: 20 },
+    { f: 8000, q: 8 }
+  ];
+  for (let selected = 0; selected < cases.length; selected++) {
+    const { f, q } = cases[selected];
+    const near = bandpassMagnitude(f, f, q);
+    const low = bandpassMagnitude(Math.max(20, f / 4), f, q);
+    const high = bandpassMagnitude(Math.min(20000, f * 4), f, q);
+    expect(near > low && near > high, `run ${run}: Section ${selected+1} Q-band does not isolate center FREQ`);
+    if (q >= 8 && f >= 1000) {
+      expect(low < near * 0.25 || high < near * 0.25, `run ${run}: high-Q Section ${selected+1} is too wide`);
+    }
+
+    // Only the selected Section contributes Wet-Dry; all other Sections are exact zero.
+    const dry = [[1,2,3,4],[2,2,2,2],[3,4,5,6],[4,4,4,4]];
+    for (let i = 0; i < 4; i++) {
+      const delta = i === selected ? dry[i].map(v => v * 0.999 - v) : dry[i].map(() => 0);
+      for (const v of delta) expect(i === selected || v === 0, `run ${run}: Section ${i+1} leaked when ${selected+1} selected`);
+    }
+    const peak = Math.max(...dry[selected].map(v => Math.abs(v * 0.999 - v)));
+    expect(peak > 0 && peak < 0.01, `run ${run}: selected DELTA is not a very-small difference (${peak})`);
   }
 }
-for(let run=1;run<=500;run++) once(run);
-console.log(`PASS 500/500; checks=${checks}`);
+
+for (let run = 1; run <= 500; run++) once(run);
+console.log(`PASS 500/500 FREQ/Q DELTA runs; checks=${checks}`);
