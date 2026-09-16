@@ -84,7 +84,6 @@ jobs:
           cp WebTester/index-fixed.html _site/index.html
           sed -i 's/app.js?v=5/app.js?v=16/g' _site/index.html
           sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
-          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=2"></script><script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
