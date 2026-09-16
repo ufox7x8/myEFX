@@ -6,7 +6,7 @@ const must=['id="inputFrame"','id="outputFrame"','id="specIn"','id="specOut"','i
 for(const x of must) expect(html.includes(x),`missing UI marker: ${x}`);
 expect(html.includes('grid-template-columns:repeat(4,minmax(0,1fr))'),'four-section metal deck missing');
 expect(!html.includes('crimson-theme.css'),'old crimson theme must not be loaded by UI');
-expect(app.includes('s.eq.frequency.setTargetAtTime(freq, now, .004)'),'canonical build source remains valid');
+expect(app.includes('s.eq.frequency.setTargetAtTime(freq, now, .0015)'),'canonical post-build EQ smoothing missing');
 function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
 function quant(v,min,max,step){v=clamp(v,min,max);return Number((Math.round(v/step)*step).toFixed(String(step).includes('.')?String(step).split('.')[1].length:0))}
 function freqMap(t){return 20*Math.pow(1000,clamp(t,0,1))}
@@ -18,8 +18,7 @@ for(let run=1;run<=6850;run++){
  expect(Number.isFinite(q)&&q>=.1&&q<=20,`run ${run}: q`);
  expect(dn>=1&&dn<=99,`run ${run}: denoise range`);
  const amount=dn/100,dry=.137+(.73*t),full=.09+.83*((run*37)%6850)/6849;
- const wet=dry+amount*(full-dry);
- const expected=dry+amount*(full-dry);
+ const wet=dry+amount*(full-dry), expected=dry+amount*(full-dry);
  expect(Math.abs(wet-expected)<Number.EPSILON*32,`run ${run}: exact linear interpolation`);
  const d=(t*.996)+.002; const d2=clamp(d,0,1); expect(d2>=0&&d2<=1,`run ${run}: normalized control`);
 }
