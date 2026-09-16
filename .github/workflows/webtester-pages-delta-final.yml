@@ -30,22 +30,30 @@ jobs:
           node WebTester/build-v5-fix.js
           node WebTester/denoise-reference-fix.js
           node WebTester/denoise-canonicalize.js
+          node WebTester/eq-realtime-patch.js
       - name: Validate JavaScript
         run: |
           node --check WebTester/build-v5-fix.js
           node --check WebTester/denoise-reference-fix.js
           node --check WebTester/denoise-canonicalize.js
+          node --check WebTester/eq-realtime-patch.js
+          node --check WebTester/eq-verify-500.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify-500-v3.js
           node --check WebTester/denoise-verify-600.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
+      - name: Run 500 EQ realtime verification
+        run: node WebTester/eq-verify-500.js
       - name: Run 500 DELTA verification
         run: node WebTester/delta-verify-500-v3.js
       - name: Run 600 De-noise verification
         run: node WebTester/denoise-verify-600.js
-      - name: Validate final DELTA and De-noise contract
+      - name: Validate final EQ, DELTA and De-noise contract
         run: |
+          grep -q 's.eq.frequency.setTargetAtTime(freq, now, .0015)' WebTester/app.js
+          grep -q 's.eq.Q.setTargetAtTime(q, now, .0015)' WebTester/app.js
+          grep -q 's.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .0015)' WebTester/app.js
           grep -q 'DELTA_DENOISE_LATENCY_SAMPLES = 4096' WebTester/app.js
           grep -q 'denoise-processor.js?v=delta16' WebTester/app.js
           grep -q 'deltaBand.connect(deltaDry)' WebTester/app.js
@@ -60,6 +68,8 @@ jobs:
           grep -q 'smoothGainCepstral' WebTester/denoise-processor.js
           grep -q 'musicalPostFilter' WebTester/denoise-processor.js
           grep -q 'this.olaNorm' WebTester/denoise-processor.js
+          test -f WebTester/crimson-theme.css
+          test -f WebTester/assets/redcore-emblem.svg
           if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
           if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
           if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
@@ -73,6 +83,8 @@ jobs:
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
           sed -i 's/app.js?v=5/app.js?v=16/g' _site/index.html
+          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
+          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=2"></script><script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
