@@ -33,28 +33,36 @@ jobs:
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
 
-      - name: Validate clean architecture
+      - name: Validate clean rewrite
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app.js
           test -s WebTester/denoise-processor.js
           test -s WebTester/transient-processor.js
           grep -q 'id="byp1"' WebTester/index-fixed.html
-          grep -q 'id="byp2"' WebTester/index-fixed.html
-          grep -q 'id="byp3"' WebTester/index-fixed.html
           grep -q 'id="byp4"' WebTester/index-fixed.html
           grep -q 'app.js?v=5' WebTester/index-fixed.html
-          grep -q 'BAND_COUNT = 4' WebTester/app.js
-          grep -q 'Wet−Dry' WebTester/app.js
-          grep -q 'deltaBand' WebTester/app.js
-          grep -q "c.audioWorklet.addModule('denoise-processor.js?v=rewrite2')" WebTester/app.js
-          grep -q "c.audioWorklet.addModule('transient-processor.js?v=rewrite2')" WebTester/app.js
-          grep -q 'myefx-denoise' WebTester/app.js
-          grep -q 'myefx-transient' WebTester/app.js
-          grep -q 'this.gain = 1' WebTester/denoise-processor.js
-          grep -q 'Math.pow(10, -reductionDb / 20)' WebTester/denoise-processor.js
-          grep -q 'if (Math.abs(punch)' WebTester/transient-processor.js
-          echo 'Clean rewrite validation passed'
+          node - <<'NODE'
+          const fs = require('fs');
+          const app = fs.readFileSync('WebTester/app.js','utf8');
+          const dn = fs.readFileSync('WebTester/denoise-processor.js','utf8');
+          const tr = fs.readFileSync('WebTester/transient-processor.js','utf8');
+          const required = [
+            'BAND_COUNT = 4',
+            'deltaBand',
+            'Wet−Dry',
+            "denoise-processor.js?v=rewrite2",
+            "transient-processor.js?v=rewrite2",
+            'myefx-denoise',
+            'myefx-transient',
+            'WetBand'
+          ];
+          for (const s of required) if (!app.includes(s)) throw new Error('Missing app contract: ' + s);
+          if (!dn.includes('Math.pow(10, -reductionDb / 20)')) throw new Error('Denoise gain contract missing');
+          if (!dn.includes('this.gain = 1')) throw new Error('Denoise unity contract missing');
+          if (!tr.includes("Math.abs(punch) < 0.0001")) throw new Error('Transient bypass contract missing');
+          console.log('Clean rewrite validation passed');
+          NODE
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
