@@ -52,7 +52,7 @@ const replacement = String.raw`  // DENOISE_REWRITE_V4: lightweight multiband Wi
           for(let k=0;k<K;k++){
             const bs=s.bands[k];if(!bs.valid){bs.targetGain=1;continue}
             let p=0;
-            for(let cc=0;cc<ch;cc++){const y=filterSample(bs,inCh[cc][i],cc);if(cc===0?s.bandL[k]!==y:s.bandR[k]!==y){}if(cc===0)s.bandL[k]=y;else s.bandR[k]=y;p+=y*y}
+            for(let cc=0;cc<ch;cc++){const y=filterSample(bs,inCh[cc][i],cc);if(cc===0)s.bandL[k]=y;else s.bandR[k]=y;p+=y*y}
             p/=Math.max(1,ch);bs.power+=(p-bs.power)*(p<bs.power?.22:.035);bs.power=Math.max(bs.power,1e-10);
             bs.noise+=(Math.min(p,bs.noise*1.12)-bs.noise)*(p<bs.noise?.075:.0018);bs.noise=Math.max(bs.noise,1e-9);
             const snr=p/(bs.noise+1e-9),wiener=clamp((snr-.55)/(snr+.35),0,1),floor=Math.pow(10,-18*amount/20),raw=1-amount*(1-wiener)*.92;
@@ -84,4 +84,3 @@ if(!re.test(src))throw new Error('makeStage/buildGraph anchor not found');
 src=src.replace(re,replacement);
 fs.writeFileSync(file,src,'utf8');
 console.log('Embedded DE-NOISE V4 into app-final.js');
-`;
