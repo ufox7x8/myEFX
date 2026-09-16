@@ -23,19 +23,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Validate JavaScript syntax
         run: |
-          node --check WebTester/app.js
-          node --check WebTester/denoise-processor.js
-          node --check WebTester/transient-processor.js
+          node --check WebTester/app-final.js
           node --check WebTester/self-test.mjs
-
       - name: Install browser test runtime
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-
       - name: Run 1900 browser regression checks
         run: node WebTester/self-test.mjs
 
@@ -48,30 +43,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Validate required files
         run: |
           test -s WebTester/index-fixed.html
-          test -s WebTester/app.js
-          test -s WebTester/denoise-processor.js
-          test -s WebTester/transient-processor.js
+          test -s WebTester/app-final.js
           test -s WebTester/self-test.mjs
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
-
       - name: Prepare site
         run: |
           rm -rf _site
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
