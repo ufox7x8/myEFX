@@ -42,6 +42,11 @@ jobs:
           node WebTester/denoise-range-verify-500.js
           node WebTester/delta-verify-500-v3.js
           node WebTester/denoise-verify-600.js
+          if grep -q 'new OfflineAudioContext' WebTester/app.js; then exit 1; fi
+          if grep -q 'await c.startRendering()' WebTester/app.js; then exit 1; fi
+          grep -q 'function ensureProcessedAnalyser' WebTester/app.js
+          grep -q 'function startProcessedPreview' WebTester/app.js
+          grep -q 'runProcessedLive();' WebTester/app.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
