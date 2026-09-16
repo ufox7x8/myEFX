@@ -33,10 +33,12 @@ jobs:
           node WebTester/denoise-canonicalize.js
           node WebTester/eq-realtime-patch.js
           node WebTester/processed-spectrum-fix.js
+          node WebTester/transient-band-guard.js
           node WebTester/denoise-range-fix.js
       - name: Validate and run previous UI 6850 regression
         run: |
           node --check WebTester/ui-6850-verify.js
+          node --check WebTester/transient-band-guard.js
           node WebTester/ui-6850-verify.js
           node WebTester/eq-verify-500.js
           node WebTester/denoise-range-verify-500.js
@@ -47,6 +49,7 @@ jobs:
           grep -q 'function ensureProcessedAnalyser' WebTester/app.js
           grep -q 'function startProcessedPreview' WebTester/app.js
           grep -q 'runProcessedLive();' WebTester/app.js
+          grep -q "s.transient.port.postMessage({ type: 'band', freq" WebTester/app.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
