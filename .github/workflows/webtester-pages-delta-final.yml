@@ -32,7 +32,7 @@ jobs:
           node WebTester/denoise-canonicalize.js
           node WebTester/eq-realtime-patch.js
           node WebTester/processed-spectrum-fix.js
-          node WebTester/transient-isolation-fix.js
+          node WebTester/transient-band-guard.js
           node WebTester/denoise-range-fix.js
       - name: Validate JavaScript syntax
         run: |
@@ -41,7 +41,7 @@ jobs:
           node --check WebTester/denoise-canonicalize.js
           node --check WebTester/eq-realtime-patch.js
           node --check WebTester/processed-spectrum-fix.js
-          node --check WebTester/transient-isolation-fix.js
+          node --check WebTester/transient-band-guard.js
           node --check WebTester/denoise-range-fix.js
           node --check WebTester/ui-6850-verify.js
           node --check WebTester/denoise-range-verify-500.js
@@ -70,6 +70,7 @@ jobs:
           grep -q 'function startProcessedPreview' WebTester/app.js
           grep -q 'function scheduleProcessedRender' WebTester/app.js
           grep -q 'runProcessedLive();' WebTester/app.js
+          grep -q "s.transient.port.postMessage({ type: 'band', freq" WebTester/app.js
           if grep -q 'new OfflineAudioContext' WebTester/app.js; then exit 1; fi
           if grep -q 'await c.startRendering()' WebTester/app.js; then exit 1; fi
           grep -q 'this.clamp(rawAmount / 100, 0.01, 0.99)' WebTester/denoise-processor.js
@@ -81,10 +82,8 @@ jobs:
           grep -q 'deltaBand.connect(deltaEQ)' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
-          grep -q 'trSum.connect(trBand)' WebTester/app.js
-          grep -q 'trBand.connect(delta)' WebTester/app.js
-          grep -q 's.trBand.frequency.setTargetAtTime(b.freq, now, .004)' WebTester/app.js
-          grep -q 's.trBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004)' WebTester/app.js
+          if grep -q 'trSum.connect(trBand)' WebTester/app.js; then exit 1; fi
+          if grep -q 'trBand.connect(delta)' WebTester/app.js; then exit 1; fi
           if grep -q 'trSum.connect(delta)' WebTester/app.js; then exit 1; fi
           grep -q 'this.N = 4096' WebTester/denoise-processor.js
           grep -q 'this.H = 512' WebTester/denoise-processor.js
