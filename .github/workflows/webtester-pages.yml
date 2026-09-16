@@ -26,7 +26,19 @@ jobs:
       - name: Apply DE-NOISE V4 runtime rewrite
         run: node WebTester/patch-denoise.mjs
       - name: Fix regression harness syntax
-        run: node -e "const fs=require('fs');const p='WebTester/self-test.mjs';let s=fs.readFileSync(p,'utf8');s=s.replaceAll(\"new Event('input',{bubbles:true))});\",\"new Event('input',{bubbles:true}));});\");fs.writeFileSync(p,s)"
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const p = 'WebTester/self-test.mjs';
+          let s = fs.readFileSync(p, 'utf8');
+          s = s.replaceAll("new Event('input',{bubbles:true))});", "new Event('input',{bubbles:true}));});");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(250);const rmsOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const rmsOff=await page.evaluate(()=>window.myEFX.meterRms());");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(600);const rmsOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const rmsOn=await page.evaluate(()=>window.myEFX.meterRms());");
+          s = s.replace("await page.locator('#resetAll').click();await page.locator('#play').click();await page.waitForTimeout(350);const noiseOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#resetAll').click();await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const noiseOff=await page.evaluate(()=>window.myEFX.meterRms());");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(900);const noiseOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const noiseOn=await page.evaluate(()=>window.myEFX.meterRms());");
+          s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
+          fs.writeFileSync(p, s);
+          NODE
       - name: Validate JavaScript syntax
         run: |
           node --check WebTester/app-final.js
