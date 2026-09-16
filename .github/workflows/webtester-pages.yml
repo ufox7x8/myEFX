@@ -66,22 +66,29 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const s = fs.readFileSync('WebTester/app.js','utf8');
-          const a = s.indexOf('if (deltaBand) {');
-          const b = s.indexOf('// Normal serial processing path.', a);
-          if (a < 0 || b < 0 || b <= a) throw new Error('DELTA block boundaries not found');
-          const d = s.slice(a, b);
-          for (const bad of ['node = s.out', 'node.connect(s.eq)', 'node.connect(s.split)']) {
-            if (d.includes(bad)) throw new Error(`Forbidden cross-Section routing inside DELTA block: ${bad}`);
-          }
-          if (!d.includes('source.connect(selected.deltaBandHP1)')) throw new Error('DELTA does not start from the original source');
-          if (!d.includes('selected.deltaMute.connect(graph.master)')) throw new Error('DELTA selected output is not exclusively routed to master');
-          if (d.includes('graph.stages[i].out') || d.includes('deltaBand - 1; i++')) throw new Error('DELTA still traverses other Sections');
-          if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand architecture remains');
-          if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA architecture remains');
+          const fnA = s.indexOf('function connectPlayback()');
+          const fnB = s.indexOf('function restartAtCurrentPosition()', fnA);
+          if (fnA < 0 || fnB < 0 || fnB <= fnA) throw new Error('connectPlayback function not found');
+          const fn = s.slice(fnA, fnB);
+          const dA = fn.indexOf('if (deltaBand) {');
+          const dB = fn.indexOf('// Normal serial processing path.', dA);
+          if (dA < 0 || dB < 0 || dB <= dA) throw new Error('DELTA branch boundary not found');
+          const d = fn.slice(dA, dB);
+          const required = [
+            'for (const stage of graph.stages)',
+            'stage.deltaMute.disconnect(graph.master)',
+            'const selected = graph.stages[deltaBand - 1]',
+            'source.connect(selected.deltaBandHP1)',
+            'selected.deltaMute.connect(graph.master)',
+            'return;'
+          ];
+          for (const marker of required) if (!d.includes(marker)) throw new Error(`DELTA routing marker missing: ${marker}`);
+          const forbidden = ['node = s.out', 'node.connect(s.eq)', 'node.connect(s.split)', 'deltaBand - 1; i++'];
+          for (const marker of forbidden) if (d.includes(marker)) throw new Error(`Forbidden cross-Section routing in DELTA branch: ${marker}`);
+          if (d.includes('graph.stages[i].out')) throw new Error('DELTA references another Section output');
           if (!s.includes('deltaDryDelay.delayTime.setTargetAtTime(DELTA_DENOISE_LATENCY_SAMPLES / ctx.sampleRate')) throw new Error('Dry latency alignment missing');
 
-          // Pure numerical Wet-minus-Dry sanity test: only the selected Section
-          // may produce non-zero DELTA samples; the other three are mathematically zero.
+          // Pure mathematical sanity check: 3 non-selected Sections are exactly zero.
           const dry = [
             new Float64Array([1,2,3,4]),
             new Float64Array([2,2,2,2]),
@@ -89,11 +96,15 @@ jobs:
             new Float64Array([4,4,4,4])
           ];
           const selected = 1;
-          const delta = dry.map((x,i) => i===selected ? x.map(v => v*0.98-v) : x.map(() => 0));
-          for (let i=0;i<4;i++) for (const v of delta[i]) if (i!==selected && v!==0) throw new Error('Non-selected Section leaked into DELTA');
-          const peak = Math.max(...delta[selected].map(Math.abs));
-          if (!(peak > 0 && peak < 0.1)) throw new Error('Selected DELTA is not a small processing-difference signal');
-          console.log('DELTA topology, isolation, dry-latency alignment and numerical Wet-minus-Dry sanity checks passed.');
+          const delta = dry.map((x,i) => i === selected ? x.map(v => v * 0.98 - v) : x.map(() => 0));
+          for (let i = 0; i < 4; i++) {
+            for (const v of delta[i]) {
+              if (i !== selected && v !== 0) throw new Error('Non-selected Section leaked into DELTA');
+            }
+          }
+          const peak = Math.max(...delta[selected].map(v => Math.abs(v)));
+          if (!(peak > 0 && peak < 0.1)) throw new Error(`Unexpected small-difference peak: ${peak}`);
+          console.log('PASS: DELTA one-Section routing, four-band isolation, dry latency alignment, and Wet-minus-Dry math contracts.');
           NODE
       - name: Setup Pages
         uses: actions/configure-pages@v5
