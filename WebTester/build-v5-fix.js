@@ -11,44 +11,34 @@ function replaceBetween(text, startMarker, endMarker, replacement) {
   return text.slice(0, a) + replacement + text.slice(b);
 }
 
-// ---------------------------------------------------------------------------
-// COMPLETE DELTA REWRITE
-// ---------------------------------------------------------------------------
-// Normal playback and DELTA monitoring are two completely separate graphs.
-// DELTA graph per Section:
+// ============================================================================
+// DELTA REWRITE
+// ============================================================================
+// Normal playback graph and DELTA graph are completely independent.
 //
-//   original source
-//       -> 4-band frequency-isolation filter for this Section
-//       -> [shared isolated signal]
-//          |-> DRY reference ---------------------> (-)
-//          |-> DELTA EQ -> DELTA De-noise ->
-//              DELTA Transient -> WET ---------> (+)
+// Each Section gets its own isolated frequency region:
+//   source -> HP4 -> LP4 -> isolated Section signal
+//                         |-> DRY
+//                         |-> dedicated DELTA EQ -> De-noise -> Transient -> WET
+//                         \-> DELTA = WET - DRY
 //
-//   DELTA = WET - DRY
-//
-// When Section 2 DELTA is selected, only Section 2's deltaOut is connected to
-// master. Sections 1/3/4 are physically disconnected from the DELTA master bus.
-// There is no serial traversal through earlier Sections.
-// ---------------------------------------------------------------------------
+// DELTA playback connects ONLY the selected Section's deltaMute to master.
+// No previous/next Section is traversed or mixed.
+// ============================================================================
 
 const createStage = `  function createStage(c) {
-    // ------------------------------
-    // Existing normal Section graph.
-    // ------------------------------
+    // ---------------- NORMAL GRAPH ----------------
     const eq = c.createBiquadFilter(); eq.type = 'peaking';
     const split = c.createBiquadFilter(); split.type = 'bandpass';
     const dryFull = c.createGain();
     const eqInvert = c.createGain(); eqInvert.gain.value = -1;
     const eqDelta = c.createGain();
-    const normalOut = c.createGain();
-
+    const out = c.createGain();
     const dnIn = c.createGain(), dnSum = c.createGain();
     const trDry = c.createGain(), trWet = c.createGain(), trSum = c.createGain();
-    const normalSpectralDelta = c.createGain();
-    const normalSpectralInvert = c.createGain(); normalSpectralInvert.gain.value = -1;
-    const out = normalOut;
+    const spectralInvert = c.createGain(); spectralInvert.gain.value = -1;
+    const spectralDelta = c.createGain();
 
-    // Normal EQ delta / spectral processing remains isolated from DELTA.
     dryFull.connect(eqInvert);
     eqInvert.connect(eqDelta);
     eq.connect(eqDelta);
@@ -61,16 +51,14 @@ const createStage = `  function createStage(c) {
     dnSum.connect(trWet);
     trDry.connect(trSum);
     trWet.connect(trSum);
-    split.connect(normalSpectralInvert);
-    normalSpectralInvert.connect(normalSpectralDelta);
-    trSum.connect(normalSpectralDelta);
-    normalSpectralDelta.connect(out);
+    split.connect(spectralInvert);
+    spectralInvert.connect(spectralDelta);
+    trSum.connect(spectralDelta);
+    spectralDelta.connect(out);
 
-    // ------------------------------
-    // Completely independent DELTA graph.
-    // ------------------------------
-    // LR4-style 4-band isolation for this Section. Frequencies are set by
-    // syncGraph() from the four Section centers and geometric crossover points.
+    // ---------------- DEDICATED DELTA GRAPH ----------------
+    // 4th-order-style crossover: two identical HP stages followed by two LP
+    // stages. Each Section is therefore an isolated spectral region.
     const deltaBandHP1 = c.createBiquadFilter(); deltaBandHP1.type = 'highpass';
     const deltaBandHP2 = c.createBiquadFilter(); deltaBandHP2.type = 'highpass';
     const deltaBandLP1 = c.createBiquadFilter(); deltaBandLP1.type = 'lowpass';
@@ -79,7 +67,6 @@ const createStage = `  function createStage(c) {
 
     const deltaDry = c.createGain();
     const deltaDryInvert = c.createGain(); deltaDryInvert.gain.value = -1;
-
     const deltaEQ = c.createBiquadFilter(); deltaEQ.type = 'peaking';
     const deltaDenoiseIn = c.createGain();
     const deltaDenoiseSum = c.createGain();
@@ -95,11 +82,11 @@ const createStage = `  function createStage(c) {
     deltaBandLP1.connect(deltaBandLP2);
     deltaBandLP2.connect(deltaBand);
 
-    // The exact same isolated samples feed both references.
+    // SAME isolated samples feed both dry and wet references.
     deltaBand.connect(deltaDry);
     deltaBand.connect(deltaEQ);
 
-    // Dedicated DELTA processing path; it never touches normal EQ/worklets.
+    // Dedicated processing chain; it never enters the normal graph.
     deltaEQ.connect(deltaDenoiseIn);
     deltaDenoiseIn.connect(deltaDenoiseSum);
     deltaDenoiseSum.connect(deltaTransientDry);
@@ -108,19 +95,19 @@ const createStage = `  function createStage(c) {
     deltaTransientWet.connect(deltaTransientSum);
     deltaTransientSum.connect(deltaWet);
 
-    // One subtraction only: Wet - Dry.
+    // Single subtraction: WET + (-DRY).
     deltaWet.connect(deltaOut);
     deltaDry.connect(deltaDryInvert);
     deltaDryInvert.connect(deltaOut);
 
-    // Default DELTA output is muted until a Section is selected.
+    // Default hard mute until the selected Section is explicitly routed.
     deltaOut.connect(deltaMute);
     deltaMute.gain.value = 0;
 
     return {
       eq, split, dryFull, eqInvert, eqDelta,
       dnIn, dnSum, trDry, trWet, trSum,
-      normalSpectralDelta, normalSpectralInvert, out,
+      spectralInvert, spectralDelta, out,
       deltaBandHP1, deltaBandHP2, deltaBandLP1, deltaBandLP2, deltaBand,
       deltaDry, deltaDryInvert, deltaEQ,
       deltaDenoiseIn, deltaDenoiseSum,
@@ -133,8 +120,9 @@ const createStage = `  function createStage(c) {
 
 s = replaceBetween(s, '  function createStage(c) {', '\n\n  async function ensureGraph()', createStage);
 
-// Add dedicated DELTA worklets immediately after the normal worklets are made.
-const oldEnsureTail = `    for (const s of graph.stages) {
+// Dedicated DELTA worklets are separate nodes so normal playback and DELTA
+// never share a processor input or accumulate parallel signals.
+const ensureOld = `    for (const s of graph.stages) {
       if (!s.denoise) {
         s.denoise = new AudioWorkletNode(c, 'myefx-denoise', { parameterData: { amount: 0 } });
         s.dnIn.disconnect(); s.dnIn.connect(s.denoise); s.denoise.connect(s.dnSum);
@@ -145,7 +133,7 @@ const oldEnsureTail = `    for (const s of graph.stages) {
       }
     }
     syncGraph();`;
-const newEnsureTail = `    for (const s of graph.stages) {
+const ensureNew = `    for (const s of graph.stages) {
       if (!s.denoise) {
         s.denoise = new AudioWorkletNode(c, 'myefx-denoise', { parameterData: { amount: 0 } });
         s.dnIn.disconnect(); s.dnIn.connect(s.denoise); s.denoise.connect(s.dnSum);
@@ -164,16 +152,15 @@ const newEnsureTail = `    for (const s of graph.stages) {
       }
     }
     syncGraph();`;
-if (!s.includes(oldEnsureTail)) throw new Error('ensureGraph worklet block not found');
-s = s.replace(oldEnsureTail, newEnsureTail);
+if (!s.includes(ensureOld)) throw new Error('ensureGraph block not found');
+s = s.replace(ensureOld, ensureNew);
 
 const syncGraph = `  function syncGraph() {
     if (!graph || !ctx) return;
     const now = ctx.currentTime;
     const data = currentData();
 
-    // Four contiguous frequency regions. Geometric-mean crossover points keep
-    // the band definitions stable on a log-frequency scale.
+    // Sort ONLY for deriving crossover boundaries. Section IDs stay intact.
     const ordered = data.map((b, i) => ({ i, f: Math.max(20, Number(b.freq)) }))
       .sort((a, b) => a.f - b.f);
     const lowEdge = 20;
@@ -191,21 +178,20 @@ const syncGraph = `  function syncGraph() {
       const freq = clamp(Number(b.freq), 20, Math.max(30, ctx.sampleRate * 0.45));
       const q = clamp(Number(b.q), 0.1, 20);
 
-      // Normal graph parameters.
+      // NORMAL graph.
       s.eq.frequency.setTargetAtTime(freq, now, .004);
       s.eq.Q.setTargetAtTime(q, now, .004);
       s.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .004);
       s.split.frequency.setTargetAtTime(freq, now, .004);
       s.split.Q.setTargetAtTime(clamp(q, .25, 18), now, .004);
       s.denoise?.parameters.get('amount')?.setTargetAtTime(b.bypass ? 0 : b.denoise, now, .004);
-
       const mix = b.bypass ? 0 : Math.min(1, (Math.abs(b.punch) + Math.abs(b.sustain)) / 160);
       s.trDry.gain.setTargetAtTime(1 - mix, now, .004);
       s.trWet.gain.setTargetAtTime(mix, now, .004);
       s.transient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.transient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
 
-      // Dedicated DELTA Section parameters.
+      // DELTA: four isolated spectral regions.
       const edge = boundaries.get(i);
       const lo = clamp(edge.lo, lowEdge, highEdge * .90);
       const hi = clamp(edge.hi, lo * 1.02, highEdge);
@@ -222,50 +208,66 @@ const syncGraph = `  function syncGraph() {
       s.deltaEQ.frequency.setTargetAtTime(freq, now, .004);
       s.deltaEQ.Q.setTargetAtTime(q, now, .004);
       s.deltaEQ.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .004);
-
       s.deltaDenoise?.parameters.get('amount')?.setTargetAtTime(b.bypass ? 0 : b.denoise, now, .004);
       s.deltaTransientDry.gain.setTargetAtTime(b.bypass ? 1 : 1 - mix, now, .004);
       s.deltaTransientWet.gain.setTargetAtTime(b.bypass ? 0 : mix, now, .004);
       s.deltaTransient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.deltaTransient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
-
-      // Bypass means no processing difference: force DELTA output to zero.
       s.deltaMute.gain.setTargetAtTime(b.bypass ? 0 : 1, now, .004);
     });
   }`;
 s = replaceBetween(s, '  function syncGraph() {', '\n\n  function disconnectPlayback()', syncGraph);
 
-// Strictly isolate the selected Section from all other Section DELTA paths.
-const oldDeltaStart = s.indexOf('    if (deltaBand) {');
-const oldNormalStart = s.indexOf('    let node = source;', oldDeltaStart);
-if (oldDeltaStart < 0 || oldNormalStart < 0) throw new Error('DELTA playback block not found');
-const deltaBlock = `    if (deltaBand) {
-      // HARD SOLO: clear every previous DELTA->master connection first.
-      for (const s of graph.stages) {
-        try { s.deltaMute.disconnect(graph.master); } catch (_) {}
-      }
+// Replace the ENTIRE playback router, rather than patching an inner branch.
+const playback = `  function connectPlayback() {
+    disconnectPlayback();
+    source = ctx.createBufferSource(); source.buffer = buffer;
+    const ls = loopEnd > loopStart ? loopStart : 0;
+    const le = loopEnd > loopStart ? loopEnd : buffer.duration;
+    source.loop = loop; source.loopStart = ls; source.loopEnd = le;
 
+    if (bypassAll) { source.connect(ctx.destination); return; }
+
+    // HARD SOLO DELTA.
+    // Before routing the selected Section, remove every Section's old delta
+    // monitor connection. Then connect source directly to ONE splitter only.
+    if (deltaBand) {
+      for (const stage of graph.stages) {
+        try { stage.deltaMute.disconnect(graph.master); } catch (_) {}
+      }
       const selected = graph.stages[deltaBand - 1];
-      // Direct source -> selected four-band splitter. No Section before or after
-      // the selected one is inserted anywhere in this path.
       source.connect(selected.deltaBandHP1);
       selected.deltaMute.connect(graph.master);
       return;
     }
 
-`;
-s = s.slice(0, oldDeltaStart) + deltaBlock + s.slice(oldNormalStart);
+    // Normal serial processing path.
+    let node = source;
+    for (const s of graph.stages) {
+      node.connect(s.dryFull);
+      node.connect(s.eq);
+      node.connect(s.split);
+      node = s.out;
+    }
+    node.connect(graph.master);
+  }`;
+s = replaceBetween(s, '  function connectPlayback() {', '\n\n  function restartAtCurrentPosition()', playback);
 
-s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta7');
-s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta7');
+s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta8');
+s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta8');
 
-for (const marker of [
-  'deltaBandHP1', 'deltaEQ', 'deltaDenoise', 'deltaTransient',
-  'deltaDryInvert', 'deltaMute', 'Wet - Dry'
-]) {
-  if (!s.includes(marker)) throw new Error(`Missing DELTA rewrite marker: ${marker}`);
+const markers = [
+  'deltaBandHP1', 'deltaBandHP2', 'deltaBandLP1', 'deltaBandLP2',
+  'deltaEQ', 'deltaDenoise', 'deltaTransient', 'deltaDryInvert',
+  'deltaMute', 'source.connect(selected.deltaBandHP1)',
+  'selected.deltaMute.connect(graph.master)'
+];
+for (const marker of markers) {
+  if (!s.includes(marker)) throw new Error(`Missing DELTA marker: ${marker}`);
 }
+if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA description remains');
+if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand DELTA remains');
 
-fs.writeFileSync('/tmp/app-v7.js', s, 'utf8');
-fs.copyFileSync('/tmp/app-v7.js', 'WebTester/app.js');
-console.log('Generated fully isolated 4-band DELTA graph.');
+fs.writeFileSync('/tmp/app-v8.js', s, 'utf8');
+fs.copyFileSync('/tmp/app-v8.js', 'WebTester/app.js');
+console.log('Generated DELTA v8: isolated 4-band solo -> dedicated processing -> Wet-minus-Dry.');
