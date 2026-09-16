@@ -6,6 +6,7 @@ on:
     paths:
       - 'WebTester/app.js'
       - 'WebTester/build-v5-fix.js'
+      - 'WebTester/delta-zero-guard.js'
       - 'WebTester/delta-verify-500.js'
       - 'WebTester/delta-verify-500-v2.js'
       - 'WebTester/denoise-processor.js'
@@ -23,10 +24,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Build canonical app
-        run: node WebTester/build-v5-fix.js
+        run: |
+          node WebTester/build-v5-fix.js
+          node WebTester/delta-zero-guard.js
       - name: Syntax check
         run: |
           node --check WebTester/build-v5-fix.js
+          node --check WebTester/delta-zero-guard.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify-500-v2.js
           node --check WebTester/denoise-processor.js
