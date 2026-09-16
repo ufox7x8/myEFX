@@ -10,7 +10,7 @@ if (oldStart < 0 || oldEnd < 0) throw new Error('createStage block not found');
 const replacement = `  function createStage(c) {
     const eq = c.createBiquadFilter(); eq.type = 'peaking';
     const split = c.createBiquadFilter(); split.type = 'bandpass';
-    // DELTA has its own bandpass so EQ changes are isolated to this Section.
+    // Dedicated bandpass for the EQ part of DELTA.
     const eqBand = c.createBiquadFilter(); eqBand.type = 'bandpass';
     const dryFull = c.createGain();
     const eqBandInvert = c.createGain(); eqBandInvert.gain.value = -1;
@@ -24,14 +24,16 @@ const replacement = `  function createStage(c) {
 
     eq.connect(out);
 
-    // Strictly band-limited EQ delta: band(EQ output) - band(original input).
+    // EQ DELTA = band(EQ output) - band(original Section input).
+    // Both sides use the exact Section FREQ/Q band, so unrelated frequencies
+    // cannot enter the EQ delta.
     eq.connect(eqBand);
     eqBand.connect(eqBandDelta);
     split.connect(eqBandInvert);
     eqBandInvert.connect(eqBandDelta);
     eqBandDelta.connect(delta);
 
-    // Strictly band-limited spectral delta: processed band - exact dry band.
+    // Spectral DELTA = processed Section band - exact dry Section band.
     split.connect(dryBand);
     split.connect(dnIn);
     dnIn.connect(dnSum);
@@ -43,7 +45,7 @@ const replacement = `  function createStage(c) {
     bandInvert.connect(delta);
     trSum.connect(delta);
 
-    // Normal output = full-band EQ + spectral processing difference.
+    // Normal serial output = full-band EQ + spectral processing difference.
     delta.connect(out);
 
     return {
@@ -55,11 +57,45 @@ const replacement = `  function createStage(c) {
 
 s = s.slice(0, oldStart) + replacement + s.slice(oldEnd);
 
-// Keep the DELTA bandpass locked to exactly the same FREQ/Q as the Section.
+// Keep both processing and DELTA isolation bands locked to the Section FREQ/Q.
 s = s.replace(
   "s.split.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);",
   "s.split.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);\n      s.eqBand.frequency.setTargetAtTime(b.freq, now, .004);\n      s.eqBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);"
 );
+
+// IMPORTANT: DELTA must not pass through preceding Sections. It is a monitoring
+// function for the selected Section, exactly like Spiff's delta monitoring:
+// original input -> selected Section -> selected Section's wet-dry difference.
+const oldDelta = `    if (deltaBand) {
+      // Feed prior sections normally, then solo only the selected section's true delta.
+      let node = source;
+      for (let i = 0; i < deltaBand - 1; i++) {
+        const s = graph.stages[i];
+        node.connect(s.dryFull);
+        node.connect(s.eq);
+        node.connect(s.split);
+        node = s.out;
+      }
+      const selected = graph.stages[deltaBand - 1];
+      node.connect(selected.dryFull);
+      node.connect(selected.eq);
+      node.connect(selected.split);
+      selected.delta.connect(graph.master);
+      return;
+    }`;
+const newDelta = `    if (deltaBand) {
+      // DELTA is an isolated monitor of ONE Section.
+      // Never feed it through previous Sections: doing so makes other Sections'
+      // processing part of the monitored difference.
+      const selected = graph.stages[deltaBand - 1];
+      source.connect(selected.dryFull);
+      source.connect(selected.eq);
+      source.connect(selected.split);
+      selected.delta.connect(graph.master);
+      return;
+    }`;
+if (!s.includes(oldDelta)) throw new Error('old DELTA routing block not found');
+s = s.replace(oldDelta, newDelta);
 
 s = s.replace("denoise-processor.js?v=rxgate3", "denoise-processor.js?v=rxgate4");
 fs.writeFileSync('/tmp/app-v5.js', s);
