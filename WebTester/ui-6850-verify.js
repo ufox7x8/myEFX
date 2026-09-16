@@ -23,15 +23,15 @@ expect(app.includes("s.transient.port.postMessage({ type: 'band', freq"),'transi
 expect(transient.includes('this.fast = (this.fast * 3 + peak) * 0.25'),'mark-renker fast envelope recurrence missing');
 expect(transient.includes('this.slow = (this.slow * 7 + peak) * 0.125'),'mark-renker slow envelope recurrence missing');
 expect(transient.includes('output[c][i] = x + this.filterBoost(boost, c);'),'only envelope boost is band-limited; input remains direct');
-expect(transient.includes('type === \'band\''),'transient band control message missing');
-expect(app.includes('deltaBand.connect(deltaDry)'),'DELTA dry fork missing');
-expect(app.includes('deltaBand.connect(deltaIdentityWet)'),'DELTA identity wet fork missing');
-expect(app.includes('deltaBand.connect(deltaEQ)'),'DELTA EQ fork missing');
-expect(app.includes('source.connect(selected.deltaBandBP1)'),'DELTA selected band input missing');
-expect(app.includes('selected.deltaMute.connect(graph.master)'),'DELTA selected output missing');
+expect(transient.includes("d.type === 'band'"),'transient band control message missing');
+
+// DELTA topology is immutable: existing connections must remain exactly present.
+for(const x of ['trSum.connect(delta);','delta.connect(out);','deltaBand.connect(deltaDry)','deltaBand.connect(deltaIdentityWet)','deltaBand.connect(deltaEQ)','deltaDry.connect(deltaDryDelay)','deltaDryDelay.connect(deltaDryInvert)','deltaIdentityWet.connect(deltaWet)','deltaProcessedWet.connect(deltaWet)','deltaWet.connect(deltaOut)','deltaDryInvert.connect(deltaOut)','deltaOut.connect(deltaMute)','source.connect(selected.deltaBandBP1)','selected.deltaMute.connect(graph.master)']) {
+  expect(app.includes(x),`DELTA topology marker missing: ${x}`);
+}
 expect(!app.includes('trBand.connect(delta)'),'transient must not insert an audio node into DELTA route');
 expect(!app.includes('trSum.connect(trBand)'),'transient must not alter DELTA graph topology');
-expect(!app.includes('trSum.connect(delta)'),'unisolated transient path must not directly bypass band guard');
+
 expect(!app.includes('new OfflineAudioContext'),'processed display must not use blocking OfflineAudioContext');
 expect(!app.includes('await c.startRendering()'),'processed display must not block on full-file rendering');
 expect(app.includes('s.eq.frequency.setTargetAtTime(freq, now, .0015)'),'canonical post-build EQ smoothing missing');
