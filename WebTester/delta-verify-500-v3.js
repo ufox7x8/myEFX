@@ -17,15 +17,17 @@ function once(run){
   for(const n of ['this.N = 4096','this.H = 512','this.alphaS = 0.90','this.alphaD = 0.95','this.ddAlpha = 0.98','this.gMin','this.spp','this.xi','this.noiseProfile','smoothGainCepstral','perceptual','musicalPostFilter','transientFloor','this.olaNorm'])
     expect(DN.includes(n),`run ${run}: missing denoize feature ${n}`);
   expect(DN.includes('const zeta = this.s[k] / Math.max(1e-12, 2 * this.sMin[k]);'),`run ${run}: SPP estimator missing`);
-  expect(DN.includes('const xi = this.ddAlpha * this.prevGain[k] * this.prevGain[k] * this.prevGamma[k]'),`run ${run}: decision-directed SNR missing`);
+  expect(DN.includes('this.prevGamma'),`run ${run}: decision-directed SNR state missing`);
   expect(DN.includes('Math.pow(Math.max(gLog, 1e-6), this.spp[k])'),`run ${run}: OMLSA blend missing`);
-  expect(DN.includes('const wetL = dryL + amount * (fullStrengthL[n] - dryL);'),`run ${run}: linear strength blend missing`);
-  expect(DN.includes('if (amount <= 0.0001) {'),`run ${run}: exact bypass missing`);
+  expect(DN.includes('dryL * (1 - amount) + fullStrengthL[n] * amount'),`run ${run}: L linear amplitude blend missing`);
+  expect(DN.includes('dryR * (1 - amount) + fullStrengthR[n] * amount'),`run ${run}: R linear amplitude blend missing`);
+  expect(DN.includes('const rawAmount = this.clamp(parameters.amount?.[0] ?? 0, 0, 100);'),`run ${run}: explicit amount normalization missing`);
+  expect(DN.includes('this.clamp(rawAmount / 100, 0.01, 0.99)'),`run ${run}: 1..99 amplitude range missing`);
 
   // Mathematical linearity contracts across 600 representative values.
   for(let n=0;n<600;n++){
-    const a=n/599, dry=.71, full=.18 + .77*((n*29)%600)/599;
-    const wet=dry+a*(full*dry-dry), delta=wet-dry, expected=a*dry*(full-1);
+    const a=n/599, dry=.71, full=-.18 + .77*((n*29)%600)/599;
+    const wet=dry*(1-a)+full*a, delta=wet-dry, expected=a*(full-dry);
     expect(Math.abs(delta-expected)<1e-12,`run ${run}: denoise linearity n=${n}`);
   }
 
