@@ -64,8 +64,8 @@ try {
       if (document.querySelectorAll('.band-byp').length !== 4) errors.push('bypass-count');
       if (!window.myEFX || typeof window.myEFX.currentData !== 'function') errors.push('api');
       const scripts = [...document.scripts].map(s => s.src).filter(Boolean);
-      if (!scripts.some(s => s.endsWith('/app.js?v=13'))) errors.push('app-path');
-      if (scripts.some(s => s.includes('/WebTester/app.js') && !s.endsWith('/app.js?v=13'))) errors.push('stale-app-path');
+      if (!scripts.some(s => s.endsWith('/app.js?v=14'))) errors.push('app-path');
+      if (scripts.some(s => s.includes('/WebTester/app.js') && !s.endsWith('/app.js?v=14'))) errors.push('stale-app-path');
       const data = window.myEFX.currentData();
       if (data.length !== 4) errors.push('data-length');
       if (Math.abs(data[0].freq - 31.5) > 0.001 || data[1].freq !== 125 || data[2].freq !== 1000 || data[3].freq !== 8000) errors.push('defaults');
@@ -106,9 +106,9 @@ try {
   console.log('STAGE2 450 control/function iterations: PASS');
 
   await page.locator('#resetAll').click();
-  await page.waitForTimeout(100);
   await page.locator('#play').click();
-  await page.waitForTimeout(250);
+  await page.waitForFunction(() => window.myEFX?.debugState()?.graphReady === true, null, { timeout: 5000 });
+  await page.waitForTimeout(180);
   const before = await page.evaluate(() => ({ state: window.myEFX.debugState(), rms: window.myEFX.meterRms(), status: document.querySelector('#status')?.textContent || '' }));
   console.log('PLAYBACK CHECK', JSON.stringify(before));
   if (!before.state.playing || before.rms <= 1e-5) fail('playback/meter failed: ' + JSON.stringify(before));
@@ -179,8 +179,8 @@ try {
     return [...new Set(errors)];
   });
   if (stage4.length) fail('STAGE4 ' + stage4.join(','));
-  console.log('STAGE4 320 final regression iterations: PASS');
 
+  console.log('STAGE4 320 final regression iterations: PASS');
   await page.locator('#stop').click();
 } catch (error) {
   fail('HARNESS: ' + error.stack);
