@@ -29,7 +29,7 @@
 <article class="band b1" data-band="1"><div class="band-head"><span class="bnum">SECTION 1</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp1" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state1">ON</span></div></div></article>
 <article class="band b2" data-band="2"><div class="band-head"><span class="bnum">SECTION 2</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp2" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state2">ON</span></div></div></article>
 <article class="band b3" data-band="3"><div class="band-head"><span class="bnum">SECTION 3</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp3" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state3">ON</span></div></div></article>
-<article class="band b4" data-band="4"><div class="band-head"><span class="bnum">SECTION 4</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button class="band-byp on" id="byp4" data-action="bypass" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state4">ON</span></div></div></article>
+<article class="band b4" data-band="4"><div class="band-head"><span class="bnum">SECTION 4</span><span class="bdot"></span></div><div class="band-body"><div class="knob-grid"></div><div class="band-buttons"><button data-action="bypass" class="band-byp on" id="byp4" type="button">BYPASS</button><button data-action="delta" type="button">DELTA</button><button data-action="reset" type="button">RESET</button></div><div class="value-line"><span>12 o’clock = 0</span><span class="state" id="state4">ON</span></div></div></article>
 </div><div class="note">DE-NOISE：64 個重疊心理聲學頻帶，結合自適應噪聲底、最小統計追蹤、時間／頻率平滑與瞬態保護；高於噪聲門檻盡量透明，低於門檻才衰減。DE-NOISE 0% 完全不處理、不增益。DELTA 只送出所選 Section 在該頻帶內真正發生的變化。</div></section>
 </div>
 <script>
@@ -44,7 +44,7 @@ for(const [idx,card] of [...document.querySelectorAll('.band')].entries()){
   }
 }
 </script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=12"></script>
 <script>
 // 初始載入就把所有旋鈕指針定位；DE-NOISE 必須明確落在 0%。
 document.querySelectorAll('.knob-input').forEach(input => {
