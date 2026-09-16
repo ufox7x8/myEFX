@@ -4,12 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'WebTester/app.js'
-      - 'WebTester/build-v5-fix.js'
-      - 'WebTester/linearize-denoise.js'
-      - 'WebTester/delta-linearity-600.js'
-      - 'WebTester/denoise-processor.js'
-      - 'WebTester/transient-processor.js'
+      - 'WebTester/**'
       - '.github/workflows/delta-linearity-600.yml'
   workflow_dispatch:
 
@@ -22,17 +17,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build and linearize processors
+      - name: Build canonical app and finalize De-noise
         run: |
           node WebTester/build-v5-fix.js
-          node WebTester/linearize-denoise.js
+          node WebTester/denoise-reference-fix.js
+          node WebTester/denoise-canonicalize.js
       - name: Syntax check
         run: |
           node --check WebTester/build-v5-fix.js
-          node --check WebTester/linearize-denoise.js
-          node --check WebTester/delta-linearity-600.js
+          node --check WebTester/denoise-reference-fix.js
+          node --check WebTester/denoise-canonicalize.js
+          node --check WebTester/denoise-verify-600.js
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Run exact 600-point linearity tests
-        run: node WebTester/delta-linearity-600.js
+      - name: Run exact 600-point De-noise tests
+        run: node WebTester/denoise-verify-600.js
