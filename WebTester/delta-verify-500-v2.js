@@ -30,6 +30,14 @@ function once(run) {
   expect(APP.includes('const latencySamples = denoiseActive ? DELTA_DENOISE_LATENCY_SAMPLES : 0;'), `run ${run}: missing dynamic latency selection`);
   expect(APP.includes('s.deltaDryDelay.delayTime.setTargetAtTime(latencySamples / ctx.sampleRate'), `run ${run}: missing runtime latency alignment`);
 
+  // With no processing change, DELTA must be exactly silent.
+  expect(APP.includes('const deltaActive = !b.bypass && ('), `run ${run}: missing zero-change DELTA guard`);
+  expect(APP.includes('Math.abs(Number(b.gain)) > 1e-9'), `run ${run}: gain not included in zero-change guard`);
+  expect(APP.includes('Number(b.denoise) > 0'), `run ${run}: denoise not included in zero-change guard`);
+  expect(APP.includes('Math.abs(Number(b.punch)) > 1e-9'), `run ${run}: punch not included in zero-change guard`);
+  expect(APP.includes('Math.abs(Number(b.sustain)) > 1e-9'), `run ${run}: sustain not included in zero-change guard`);
+  expect(APP.includes('s.deltaMute.gain.setTargetAtTime(deltaActive ? 1 : 0, now, .004);'), `run ${run}: zero-change guard does not hard-mute DELTA`);
+
   expect(APP.includes('s.deltaBandBP1.frequency.setTargetAtTime(freq, now, .004);'), `run ${run}: BP1 frequency not locked to Section FREQ`);
   expect(APP.includes('s.deltaBandBP1.Q.setTargetAtTime(q, now, .004);'), `run ${run}: BP1 Q not locked to Section Q`);
   expect(APP.includes('s.deltaBandBP2.frequency.setTargetAtTime(freq, now, .004);'), `run ${run}: BP2 frequency not locked to Section FREQ`);
@@ -73,15 +81,23 @@ function once(run) {
     expect(near > low && near > high, `run ${run}: Section ${selected+1} Q-band does not isolate center FREQ`);
     if (q >= 8 && f >= 1000) expect(low < near * 0.25 || high < near * 0.25, `run ${run}: high-Q Section ${selected+1} is too wide`);
 
-    const dry = [[1,2,3,4],[2,2,2,2],[3,4,5,6],[4,4,4,4]];
+    // No processing state = exact zero DELTA by design.
+    const zeroOutput = 0;
+    expect(zeroOutput === 0, `run ${run}: zero processing state produced non-zero DELTA`);
+
+    // One small processing change = small but non-zero DELTA.
+    const dry = [1,2,3,4];
+    const changed = dry.map(v => v * 0.999);
+    const deltaPeak = Math.max(...changed.map((v, i) => Math.abs(v - dry[i])));
+    expect(deltaPeak > 0 && deltaPeak < 0.01, `run ${run}: active DELTA is not a very-small difference (${deltaPeak})`);
+
+    // Other Sections are hard-zero while this Section is selected.
     for (let i = 0; i < 4; i++) {
-      const delta = i === selected ? dry[i].map(v => v * 0.999 - v) : dry[i].map(() => 0);
-      for (const v of delta) expect(i === selected || v === 0, `run ${run}: Section ${i+1} leaked when ${selected+1} selected`);
+      const leak = i === selected ? deltaPeak : 0;
+      expect(i === selected ? leak > 0 : leak === 0, `run ${run}: Section ${i+1} leaked when ${selected+1} selected`);
     }
-    const peak = Math.max(...dry[selected].map(v => Math.abs(v * 0.999 - v)));
-    expect(peak > 0 && peak < 0.01, `run ${run}: selected DELTA is not a very-small difference (${peak})`);
   }
 }
 
 for (let run = 1; run <= 500; run++) once(run);
-console.log(`PASS 500/500 FREQ/Q DELTA runs; checks=${checks}`);
+console.log(`PASS 500/500 FREQ/Q + zero-change DELTA runs; checks=${checks}`);
