@@ -23,8 +23,8 @@ class MyEFXTransientProcessor extends AudioWorkletProcessor {
       this.med=this.medCoeff*this.med+(1-this.medCoeff)*peak;
       this.slow=this.slowCoeff*this.slow+(1-this.slowCoeff)*peak;
       const floor=Math.max(this.slow,1e-5);
-      const transient=Math.max(0,Math.min(1,(this.fast/floor)-1);
-      const body=Math.max(0,Math.min(1,(this.med/floor)-.15);
+      const transient=Math.max(0,Math.min(1,(this.fast/floor)-1));
+      const body=Math.max(0,Math.min(1,(this.med/floor)-.15));
       // Linear control law: DELTA contribution is proportional to the knob value.
       // 0% = unity; +/-100% scales the detected transient/body contribution linearly.
       const gain=Math.min(3,Math.max(.2,1 + punch*1.0*transient + sustain*.75*body));
