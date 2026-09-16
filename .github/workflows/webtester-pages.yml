@@ -23,15 +23,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Apply DE-NOISE V4 runtime rewrite
+        run: node WebTester/patch-denoise.mjs
       - name: Validate JavaScript syntax
         run: |
           node --check WebTester/app-final.js
+          node --check WebTester/patch-denoise.mjs
           node --check WebTester/self-test.mjs
       - name: Install browser test runtime
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Run PLAN60 + 50 + 480 + 320 browser regression checks
+      - name: Run DE-NOISE 8000 + PLAN60 + 120 + 180 + 655 + 820 browser regression checks
         run: node WebTester/self-test.mjs
 
   deploy:
@@ -43,10 +46,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Apply DE-NOISE V4 runtime rewrite
+        run: node WebTester/patch-denoise.mjs
       - name: Validate required files
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app-final.js
+          test -s WebTester/patch-denoise.mjs
           test -s WebTester/self-test.mjs
       - name: Setup Pages
         uses: actions/configure-pages@v5
