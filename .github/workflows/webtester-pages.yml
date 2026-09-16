@@ -31,10 +31,11 @@ jobs:
           node WebTester/build-v5-fix.js
       - name: Validate JavaScript syntax
         run: |
+          node --check WebTester/build-v5-fix.js
           node --check WebTester/app.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
-      - name: Validate required files and UI contracts
+      - name: Validate required files and DELTA graph contract
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app.js
@@ -47,28 +48,33 @@ jobs:
           grep -q 'app.js?v=5' WebTester/index-fixed.html
           grep -q 'rangeIn' WebTester/index-fixed.html
           grep -q 'rangeOut' WebTester/index-fixed.html
-          grep -q 'deltaBand' WebTester/app.js
-          grep -q 'dryBand' WebTester/app.js
-          grep -q 'wetBand' WebTester/app.js
-          grep -q 'wetBandSum' WebTester/app.js
+          grep -q 'deltaBandHP1' WebTester/app.js
+          grep -q 'deltaBandHP2' WebTester/app.js
+          grep -q 'deltaBandLP1' WebTester/app.js
+          grep -q 'deltaBandLP2' WebTester/app.js
+          grep -q 'deltaEQ' WebTester/app.js
+          grep -q 'deltaDenoise' WebTester/app.js
+          grep -q 'deltaTransient' WebTester/app.js
           grep -q 'deltaDryInvert' WebTester/app.js
-          grep -q 'spectralDelta' WebTester/app.js
-          grep -q 'denoise-processor.js?v=rxgate4' WebTester/app.js
-          grep -q 'knobDeltaPerPixel' WebTester/app.js
-          grep -q 'setRangeFromCanvas' WebTester/app.js
-          grep -q "e.code !== 'Space'" WebTester/app.js
-          grep -q 'this.BANDS = 64' WebTester/denoise-processor.js
-          grep -q 'const target = Math.pow(10, -attenuationDb / 20)' WebTester/denoise-processor.js
-          grep -q 'const olaScale = 1 / 3' WebTester/denoise-processor.js
-          if grep -qE 'decision-directed Wiener|log-MMSE' WebTester/denoise-processor.js; then
-            echo 'Unexpected old Wiener/log-MMSE implementation remains'
+          grep -q 'deltaMute' WebTester/app.js
+          grep -q 'Wet - Dry' WebTester/app.js
+          grep -q 'source.connect(selected.deltaBandHP1)' WebTester/app.js
+          grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
+          grep -q 'denoise-processor.js?v=delta7' WebTester/app.js
+          grep -q 'transient-processor.js?v=delta7' WebTester/app.js
+          if grep -q 'node = s.out' WebTester/app.js; then
+            echo 'Forbidden serial Section traversal remains in DELTA path'
             exit 1
           fi
-          if grep -q 'eqBandDelta' WebTester/app.js; then
-            echo 'Old split EQ-DELTA architecture remains'
+          if grep -q 'Feed prior sections normally' WebTester/app.js; then
+            echo 'Old multi-Section DELTA routing remains'
             exit 1
           fi
-          echo 'Required files, syntax, isolated WetBand-minus-DryBand DELTA, 64-band denoise, keyboard and range-loop contracts OK'
+          if grep -q 'wetBandSum' WebTester/app.js; then
+            echo 'Old mixed WetBand/DryBand DELTA architecture remains'
+            exit 1
+          fi
+          echo 'Isolated 4-band DELTA: selected band only, dedicated processing graph, single Wet-minus-Dry subtraction.'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
