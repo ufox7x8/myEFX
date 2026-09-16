@@ -49,7 +49,7 @@ jobs:
           grep -q 'id="byp2"' WebTester/index-fixed.html
           grep -q 'id="byp3"' WebTester/index-fixed.html
           grep -q 'id="byp4"' WebTester/index-fixed.html
-          grep -q 'app.js?v=5' WebTester/index-fixed.html
+          grep -q 'app.js?v=12' WebTester/index-fixed.html
           grep -q 'rangeIn' WebTester/index-fixed.html
           grep -q 'rangeOut' WebTester/index-fixed.html
           grep -q 'deltaBandBP1' WebTester/app.js
@@ -88,7 +88,7 @@ jobs:
             echo 'Old mixed WetBand/DryBand DELTA architecture remains'
             exit 1
           fi
-          echo 'DELTA FREQ/Q contract OK.'
+          echo 'DELTA contract OK.'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
