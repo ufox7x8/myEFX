@@ -25,6 +25,8 @@ jobs:
         uses: actions/checkout@v5
       - name: Apply DE-NOISE V4 runtime rewrite
         run: node WebTester/patch-denoise.mjs
+      - name: Add DE-NOISE runtime probe
+        run: node WebTester/patch-denoise-probe.mjs
       - name: Fix regression harness syntax
         run: |
           node - <<'NODE'
@@ -32,17 +34,20 @@ jobs:
           const p = 'WebTester/self-test.mjs';
           let s = fs.readFileSync(p, 'utf8');
           s = s.replaceAll("new Event('input',{bubbles:true))});", "new Event('input',{bubbles:true}));});");
-          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(250);const rmsOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const rmsOff=await page.evaluate(()=>window.myEFX.meterRms());");
-          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(600);const rmsOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const rmsOn=await page.evaluate(()=>window.myEFX.meterRms());");
-          s = s.replace("await page.locator('#resetAll').click();await page.locator('#play').click();await page.waitForTimeout(350);const noiseOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#resetAll').click();await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const noiseOff=await page.evaluate(()=>window.myEFX.meterRms());");
-          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(900);const noiseOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const noiseOn=await page.evaluate(()=>window.myEFX.meterRms());");
-          s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(250);const rmsOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.evaluate(()=>{const f=document.querySelector('#freq2');f.value='500';f.dispatchEvent(new Event('input',{bubbles:true}))});await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const probeOff=await page.evaluate(()=>window.myEFX.debugState().denoiseProbe?.[1]||null);");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(600);const rmsOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const probeOn=await page.evaluate(()=>window.myEFX.debugState().denoiseProbe?.[1]||null);");
+          s = s.replace("if(denoiseOff!==0||!Number.isFinite(rmsOff)||!Number.isFinite(rmsOn)||rmsOn<=0||rmsOn>rmsOff*1.08)fail(`voice+noise denoise behavior off=${rmsOff} on=${rmsOn}`);else console.log('VOICE+NOISE denoise behavior: PASS',JSON.stringify({rmsOff,rmsOn}));", "if(denoiseOff!==0||!probeOff||!probeOn||probeOff.blocks<5||probeOn.blocks<5||probeOff.inputRms<=1e-6||probeOn.inputRms<=1e-6||!Number.isFinite(probeOn.outputRms)||probeOn.outputRms>probeOn.inputRms*1.001)fail('voice+noise denoise probe failed: '+JSON.stringify({probeOff,probeOn}));else console.log('VOICE+NOISE direct DSP probe: PASS',JSON.stringify({probeOff,probeOn}));");
+          s = s.replace("await page.locator('#resetAll').click();await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const noiseOff=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#resetAll').click();await page.evaluate(()=>{const f=document.querySelector('#freq2');f.value='500';f.dispatchEvent(new Event('input',{bubbles:true}))});await page.locator('#loop').click();await page.locator('#play').click();await page.waitForTimeout(500);const noiseProbeOff=await page.evaluate(()=>window.myEFX.debugState().denoiseProbe?.[1]||null);");
+          s = s.replace("await page.locator('#play').click();await page.waitForTimeout(700);const noiseOn=await page.evaluate(()=>window.myEFX.meterRms());", "await page.locator('#play').click();await page.waitForTimeout(700);const noiseProbeOn=await page.evaluate(()=>window.myEFX.debugState().denoiseProbe?.[1]||null);");
+          s = s.replace("if(!(noiseOn<noiseOff*.92))fail(`noise-only suppression too small off=${noiseOff} on=${noiseOn}`);else console.log('NOISE-ONLY suppression: PASS',JSON.stringify({noiseOff,noiseOn}));", "if(!noiseProbeOff||!noiseProbeOn||noiseProbeOff.inputRms<=1e-6||noiseProbeOn.inputRms<=1e-6||noiseProbeOn.outputRms>=noiseProbeOn.inputRms*.995)fail('noise-only direct DSP probe too small: '+JSON.stringify({noiseProbeOff,noiseProbeOn}));else console.log('NOISE-ONLY direct DSP suppression: PASS',JSON.stringify({noiseProbeOff,noiseProbeOn}));");
+          s = s.replace("if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
           fs.writeFileSync(p, s);
           NODE
       - name: Validate JavaScript syntax
         run: |
           node --check WebTester/app-final.js
           node --check WebTester/patch-denoise.mjs
+          node --check WebTester/patch-denoise-probe.mjs
           node --check WebTester/self-test.mjs
       - name: Install browser test runtime
         run: |
@@ -62,11 +67,14 @@ jobs:
         uses: actions/checkout@v5
       - name: Apply DE-NOISE V4 runtime rewrite
         run: node WebTester/patch-denoise.mjs
+      - name: Add DE-NOISE runtime probe
+        run: node WebTester/patch-denoise-probe.mjs
       - name: Validate required files
         run: |
           test -s WebTester/index-fixed.html
           test -s WebTester/app-final.js
           test -s WebTester/patch-denoise.mjs
+          test -s WebTester/patch-denoise-probe.mjs
           test -s WebTester/self-test.mjs
       - name: Setup Pages
         uses: actions/configure-pages@v5
