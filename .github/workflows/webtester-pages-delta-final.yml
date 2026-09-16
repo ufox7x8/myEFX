@@ -6,7 +6,6 @@ on:
     paths:
       - 'WebTester/**'
       - '.github/workflows/webtester-pages-delta-final.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,17 +25,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build canonical DELTA app
-        run: node WebTester/build-v5-fix.js
+      - name: Build canonical DELTA app and linearize processors
+        run: |
+          node WebTester/build-v5-fix.js
+          node WebTester/linearize-denoise.js
       - name: Validate JavaScript
         run: |
           node --check WebTester/build-v5-fix.js
+          node --check WebTester/linearize-denoise.js
           node --check WebTester/app.js
           node --check WebTester/delta-verify-500-v2.js
+          node --check WebTester/delta-linearity-600.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
       - name: Run 500 DELTA verification
         run: node WebTester/delta-verify-500-v2.js
+      - name: Run 600 linearity verification
+        run: node WebTester/delta-linearity-600.js
       - name: Validate final DELTA contract
         run: |
           grep -q 'deltaBand.connect(deltaDry)' WebTester/app.js
@@ -46,6 +51,8 @@ jobs:
           grep -q 's.deltaProcessedWet.gain.setTargetAtTime(deltaActive ? 1 : 0' WebTester/app.js
           grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
           grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
+          grep -q 'const g = 1 + amount * (fullGain - 1);' WebTester/denoise-processor.js
+          grep -q '1 + punch*1.0*transient + sustain*.75*body' WebTester/transient-processor.js
           if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
           if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
           if grep -q 'deltaBandHP1' WebTester/app.js; then exit 1; fi
@@ -58,7 +65,7 @@ jobs:
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's/app.js?v=5/app.js?v=14/g' _site/index.html
+          sed -i 's/app.js?v=5/app.js?v=15/g' _site/index.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
