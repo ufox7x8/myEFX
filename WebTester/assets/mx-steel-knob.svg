@@ -6,6 +6,6 @@
 </defs>
 <circle cx="80" cy="80" r="73" fill="#0b0c0e" stroke="url(#r)" stroke-width="4" filter="url(#s)"/>
 <circle cx="80" cy="80" r="62" fill="url(#b)" stroke="#24272b" stroke-width="3"/>
-<path d="M80 23v32" stroke="#f5f6f7" stroke-width="5" stroke-linecap="round"/>
 <circle cx="80" cy="80" r="49" fill="none" stroke="#e1e2e4" stroke-opacity=".12" stroke-width="1"/>
+<circle cx="59" cy="49" r="7" fill="#fff" opacity=".12"/>
 </svg>
