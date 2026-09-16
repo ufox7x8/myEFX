@@ -31,7 +31,7 @@ jobs:
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Run 1900 browser regression checks
+      - name: Run PLAN60 + 50 + 480 + 320 browser regression checks
         run: node WebTester/self-test.mjs
 
   deploy:
