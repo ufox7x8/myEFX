@@ -76,8 +76,10 @@ const live = `  function ensureProcessedAnalyser() {
     if (clear) { c.fillStyle = '#050304'; c.fillRect(0, 0, W, H); }
     const data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(data);
-    const x = W - 1;
-    if (W > 1) c.drawImage(canvas, 1, 0, W - 1, H, 0, 0, W - 1, H);
+    if (W > 1) {
+      const img = c.getImageData(1, 0, W - 1, H);
+      c.putImageData(img, 0, 0);
+    }
     const col = c.createImageData(1, H), px = col.data;
     const bins = data.length, nyquist = ctx ? ctx.sampleRate * 0.5 : 24000;
     for (let y = 0; y < H; y++) {
@@ -86,7 +88,7 @@ const live = `  function ensureProcessedAnalyser() {
       const q = Math.pow(data[k] / 255, .72), p = y * 4;
       px[p] = 18 + 190 * q; px[p + 1] = 3 + 42 * q; px[p + 2] = 12 + 54 * q; px[p + 3] = 255;
     }
-    c.putImageData(col, x, 0);
+    c.putImageData(col, W - 1, 0);
   }
 
   let processedRaf = 0;
@@ -96,7 +98,7 @@ const live = `  function ensureProcessedAnalyser() {
     if (!analyser) return;
     processedRaf = requestAnimationFrame(function tick() {
       drawProcessedFrame(analyser, false);
-      if (playing) processedRaf = requestAnimationFrame(tick);
+      if (playing || previewSource) processedRaf = requestAnimationFrame(tick);
     });
   }
   function stopProcessedLive() { cancelAnimationFrame(processedRaf); processedRaf = 0; }
@@ -118,9 +120,7 @@ const live = `  function ensureProcessedAnalyser() {
     const center = Math.round(clamp(offset, 0, Math.max(0, buffer.duration)) * sr);
     const start = clamp(center - Math.floor(previewSamples / 2), 0, Math.max(0, buffer.length - previewSamples));
     const previewBuf = ctx.createBuffer(buffer.numberOfChannels, previewSamples, sr);
-    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-      previewBuf.copyToChannel(buffer.getChannelData(ch).subarray(start, start + previewSamples), ch);
-    }
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) previewBuf.copyToChannel(buffer.getChannelData(ch).subarray(start, start + previewSamples), ch);
 
     const src = ctx.createBufferSource(); src.buffer = previewBuf;
     let node = src;
