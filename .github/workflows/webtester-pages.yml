@@ -1,4 +1,4 @@
-name: Deploy myEFX Web Tester - Previous UI
+name: Deploy myEFX Web Tester
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages-previous-ui
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -26,44 +26,51 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Build canonical audio graph
+
+      - name: Validate JavaScript syntax
         run: |
-          node WebTester/build-v5-fix.js
-          node WebTester/denoise-reference-fix.js
-          node WebTester/denoise-canonicalize.js
-          node WebTester/eq-realtime-patch.js
-          node WebTester/processed-spectrum-fix.js
-          node WebTester/transient-band-guard.js
-          node WebTester/denoise-range-fix.js
-      - name: Validate and run previous UI 6850 regression
+          node --check WebTester/app.js
+          node --check WebTester/denoise-processor.js
+          node --check WebTester/transient-processor.js
+
+      - name: Validate clean architecture
         run: |
-          node --check WebTester/ui-6850-verify.js
-          node --check WebTester/transient-band-guard.js
-          node WebTester/ui-6850-verify.js
-          node WebTester/eq-verify-500.js
-          node WebTester/denoise-range-verify-500.js
-          node WebTester/delta-verify-500-v3.js
-          node WebTester/denoise-verify-600.js
-          if grep -q 'new OfflineAudioContext' WebTester/app.js; then exit 1; fi
-          if grep -q 'await c.startRendering()' WebTester/app.js; then exit 1; fi
-          grep -q 'function ensureProcessedAnalyser' WebTester/app.js
-          grep -q 'function startProcessedPreview' WebTester/app.js
-          grep -q 'runProcessedLive();' WebTester/app.js
-          grep -q "s.transient.port.postMessage({ type: 'band', freq" WebTester/app.js
+          test -s WebTester/index-fixed.html
+          test -s WebTester/app.js
+          test -s WebTester/denoise-processor.js
+          test -s WebTester/transient-processor.js
+          grep -q 'id="byp1"' WebTester/index-fixed.html
+          grep -q 'id="byp2"' WebTester/index-fixed.html
+          grep -q 'id="byp3"' WebTester/index-fixed.html
+          grep -q 'id="byp4"' WebTester/index-fixed.html
+          grep -q 'app.js?v=5' WebTester/index-fixed.html
+          grep -q 'BAND_COUNT = 4' WebTester/app.js
+          grep -q 'Wet−Dry' WebTester/app.js
+          grep -q 'deltaBand' WebTester/app.js
+          grep -q "c.audioWorklet.addModule('denoise-processor.js?v=rewrite2')" WebTester/app.js
+          grep -q "c.audioWorklet.addModule('transient-processor.js?v=rewrite2')" WebTester/app.js
+          grep -q 'myefx-denoise' WebTester/app.js
+          grep -q 'myefx-transient' WebTester/app.js
+          grep -q 'this.gain = 1' WebTester/denoise-processor.js
+          grep -q 'Math.pow(10, -reductionDb / 20)' WebTester/denoise-processor.js
+          grep -q 'if (Math.abs(punch)' WebTester/transient-processor.js
+          echo 'Clean rewrite validation passed'
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
       - name: Prepare site
         run: |
           rm -rf _site
           mkdir -p _site
           cp -R WebTester/. _site/
           cp WebTester/index-fixed.html _site/index.html
-          sed -i 's#</head>#<link rel="stylesheet" href="crimson-theme.css?v=2"></head>#' _site/index.html
-          sed -i 's#</body>#<script src="eq-realtime-patch.js?v=6850"></script><script>window.__MYEFX_CRIMSON__=1;</script></body>#' _site/index.html
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
