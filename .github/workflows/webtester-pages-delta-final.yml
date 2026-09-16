@@ -1,0 +1,66 @@
+name: Deploy myEFX Web Tester - DELTA Final
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'WebTester/**'
+      - '.github/workflows/webtester-pages-delta-final.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-delta-final
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Build canonical app and apply DELTA zero guard
+        run: |
+          node WebTester/build-v5-fix.js
+          node WebTester/delta-zero-guard.js
+      - name: Validate JavaScript
+        run: |
+          node --check WebTester/build-v5-fix.js
+          node --check WebTester/delta-zero-guard.js
+          node --check WebTester/app.js
+          node --check WebTester/delta-verify-500-v2.js
+          node --check WebTester/denoise-processor.js
+          node --check WebTester/transient-processor.js
+      - name: Run 500 DELTA verification
+        run: node WebTester/delta-verify-500-v2.js
+      - name: Validate final DELTA contract
+        run: |
+          grep -q 'const deltaActive = !b.bypass && (' WebTester/app.js
+          grep -q 's.deltaMute.gain.setTargetAtTime(deltaActive ? 1 : 0, now, .004);' WebTester/app.js
+          grep -q 'source.connect(selected.deltaBandBP1)' WebTester/app.js
+          grep -q 'selected.deltaMute.connect(graph.master)' WebTester/app.js
+          if grep -q 'Feed prior sections normally' WebTester/app.js; then exit 1; fi
+          if grep -q 'boundaries = new Map' WebTester/app.js; then exit 1; fi
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Prepare site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp -R WebTester/. _site/
+          cp WebTester/index-fixed.html _site/index.html
+          sed -i 's/app.js?v=5/app.js?v=13/g' _site/index.html
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
