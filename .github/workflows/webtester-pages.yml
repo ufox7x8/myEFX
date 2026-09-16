@@ -48,8 +48,11 @@ jobs:
           grep -q 'rangeIn' WebTester/index-fixed.html
           grep -q 'rangeOut' WebTester/index-fixed.html
           grep -q 'deltaBand' WebTester/app.js
-          grep -q 'eqBandDelta' WebTester/app.js
-          grep -q 'eqBand' WebTester/app.js
+          grep -q 'dryBand' WebTester/app.js
+          grep -q 'wetBand' WebTester/app.js
+          grep -q 'wetBandSum' WebTester/app.js
+          grep -q 'deltaDryInvert' WebTester/app.js
+          grep -q 'spectralDelta' WebTester/app.js
           grep -q 'denoise-processor.js?v=rxgate4' WebTester/app.js
           grep -q 'knobDeltaPerPixel' WebTester/app.js
           grep -q 'setRangeFromCanvas' WebTester/app.js
@@ -61,7 +64,11 @@ jobs:
             echo 'Unexpected old Wiener/log-MMSE implementation remains'
             exit 1
           fi
-          echo 'Required files, syntax, band-limited DELTA, 64-band denoise, keyboard and range-loop contracts OK'
+          if grep -q 'eqBandDelta' WebTester/app.js; then
+            echo 'Old split EQ-DELTA architecture remains'
+            exit 1
+          fi
+          echo 'Required files, syntax, isolated WetBand-minus-DryBand DELTA, 64-band denoise, keyboard and range-loop contracts OK'
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare site
