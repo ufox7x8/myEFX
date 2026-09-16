@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+<defs>
+ <radialGradient id="b" cx="35%" cy="27%"><stop offset="0" stop-color="#c7c9cc"/><stop offset=".28" stop-color="#777a7e"/><stop offset=".58" stop-color="#2d3034"/><stop offset=".84" stop-color="#111316"/><stop offset="1" stop-color="#050607"/></radialGradient>
+ <linearGradient id="r" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f1f2f3"/><stop offset=".22" stop-color="#5e6165"/><stop offset=".52" stop-color="#17191c"/><stop offset=".8" stop-color="#777a7e"/><stop offset="1" stop-color="#f0f1f2"/></linearGradient>
+ <filter id="s"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000" flood-opacity=".65"/></filter>
+</defs>
+<circle cx="80" cy="80" r="73" fill="#0b0c0e" stroke="url(#r)" stroke-width="4" filter="url(#s)"/>
+<circle cx="80" cy="80" r="62" fill="url(#b)" stroke="#24272b" stroke-width="3"/>
+<path d="M80 23v32" stroke="#f5f6f7" stroke-width="5" stroke-linecap="round"/>
+<circle cx="80" cy="80" r="49" fill="none" stroke="#e1e2e4" stroke-opacity=".12" stroke-width="1"/>
+</svg>
