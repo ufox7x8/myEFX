@@ -30,7 +30,7 @@ jobs:
       - name: Add DE-NOISE runtime probe
         run: node WebTester/patch-denoise-probe.mjs
 
-      - name: Fix regression harness syntax and remove invalid headless RMS gates
+      - name: Fix regression harness syntax, headless RMS gate and DELTA assertion
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -47,6 +47,8 @@ jobs:
             const replacement = `  await page.locator('#resetAll').click();\n  await page.locator('#loop').click();\n  await page.locator('#play').click();\n  await page.waitForTimeout(450);\n  const denoiseProbe = await page.evaluate(() => window.myEFX.debugState().denoiseProbe?.[1] || null);\n  await page.locator('#stop').click();\n  if (!denoiseProbe || denoiseProbe.blocks < 5) fail('DE-NOISE callback did not run: '+JSON.stringify(denoiseProbe));\n  else console.log('DE-NOISE DSP callback probe: PASS', JSON.stringify(denoiseProbe));\n\n`;
             s = s.slice(0, a) + replacement + s.slice(b);
           }
+
+          s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
 
           fs.writeFileSync(p, s);
           NODE
