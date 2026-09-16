@@ -1,37 +1,39 @@
 class MyEFXTransientProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors(){return[
-    {name:'punch',defaultValue:0,minValue:-100,maxValue:100,automationRate:'k-rate'},
-    {name:'sustain',defaultValue:0,minValue:-100,maxValue:100,automationRate:'k-rate'}
-  ];}
-  constructor(){
-    super();
-    this.fast=0;this.slow=0;this.med=0;
-    this.fastCoeff=Math.exp(-1/(0.0045*sampleRate));
-    this.slowCoeff=Math.exp(-1/(0.075*sampleRate));
-    this.medCoeff=Math.exp(-1/(0.020*sampleRate));
+  static get parameterDescriptors() {
+    return [
+      { name: 'punch', defaultValue: 0, minValue: -100, maxValue: 100, automationRate: 'k-rate' },
+      { name: 'sustain', defaultValue: 0, minValue: -100, maxValue: 100, automationRate: 'k-rate' }
+    ];
   }
-  process(inputs,outputs,parameters){
-    const input=inputs[0],output=outputs[0];
-    if(!input.length)return true;
-    const frames=input[0].length,ch=input.length;
-    const punch=(parameters.punch?.[0]??0)/100;
-    const sustain=(parameters.sustain?.[0]??0)/100;
-    for(let i=0;i<frames;i++){
-      let peak=0;
-      for(let c=0;c<ch;c++)peak=Math.max(peak,Math.abs(input[c][i]));
-      this.fast=this.fastCoeff*this.fast+(1-this.fastCoeff)*peak;
-      this.med=this.medCoeff*this.med+(1-this.medCoeff)*peak;
-      this.slow=this.slowCoeff*this.slow+(1-this.slowCoeff)*peak;
-      const floor=Math.max(this.slow,1e-5);
-      const transient=Math.max(0,Math.min(1,(this.fast/floor)-1));
-      const body=Math.max(0,Math.min(1,(this.med/floor)-.15));
-      // Linear control law: DELTA contribution is proportional to the knob value.
-      // 0% = unity; +/-100% scales the detected transient/body contribution linearly.
-      const gain=Math.min(3,Math.max(.2,1 + punch*1.0*transient + sustain*.75*body));
-      for(let c=0;c<Math.min(ch,output.length);c++)output[c][i]=input[c][i]*gain;
-      for(let c=ch;c<output.length;c++)output[c][i]=input[0][i]*gain;
+  constructor() {
+    super();
+    this.fast = 0;
+    this.slow = 0;
+  }
+  process(inputs, outputs, parameters) {
+    const input = inputs[0], output = outputs[0];
+    if (!input || !input.length) return true;
+    const frames = input[0].length;
+    const ch = Math.min(input.length, output.length);
+    const punch = (parameters.punch?.[0] ?? 0) / 100;
+    const sustain = (parameters.sustain?.[0] ?? 0) / 100;
+    const absP = Math.abs(punch), absS = Math.abs(sustain);
+    const externalMix = Math.min(1, (absP + absS) * 0.625);
+    const attackScale = externalMix > 0 ? punch * 0.5 / externalMix : 0;
+    const sustainScale = externalMix > 0 ? sustain * 0.5 / externalMix : 0;
+    for (let i = 0; i < frames; i++) {
+      let peak = 0;
+      for (let c = 0; c < ch; c++) peak = Math.max(peak, Math.abs(input[c][i]));
+      this.fast = (this.fast * 3 + peak) * 0.25;
+      this.slow = (this.slow * 7 + peak) * 0.125;
+      for (let c = 0; c < output.length; c++) {
+        const x = input[Math.min(c, input.length - 1)][i];
+        const sign = x < 0 ? -1 : 1;
+        const boost = sign * (this.fast * attackScale + this.slow * sustainScale);
+        output[c][i] = x + boost;
+      }
     }
     return true;
   }
 }
-registerProcessor('myefx-transient',MyEFXTransientProcessor);
+registerProcessor('myefx-transient', MyEFXTransientProcessor);
