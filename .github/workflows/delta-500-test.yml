@@ -7,6 +7,7 @@ on:
       - 'WebTester/app.js'
       - 'WebTester/build-v5-fix.js'
       - 'WebTester/delta-verify-500.js'
+      - 'WebTester/delta-verify-500-v2.js'
       - 'WebTester/denoise-processor.js'
       - 'WebTester/transient-processor.js'
       - '.github/workflows/delta-500-test.yml'
@@ -27,8 +28,8 @@ jobs:
         run: |
           node --check WebTester/build-v5-fix.js
           node --check WebTester/app.js
-          node --check WebTester/delta-verify-500.js
+          node --check WebTester/delta-verify-500-v2.js
           node --check WebTester/denoise-processor.js
           node --check WebTester/transient-processor.js
       - name: Run 500 DELTA tests
-        run: node WebTester/delta-verify-500.js
+        run: node WebTester/delta-verify-500-v2.js
