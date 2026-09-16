@@ -2,42 +2,46 @@ const fs = require('fs');
 const path = 'WebTester/app.js';
 let s = fs.readFileSync(path, 'utf8');
 
-// Structural guard only: preserve the existing DELTA graph/order and isolate the
-// mark-renker transient result back into its Section band before DELTA receives it.
-const createMarker = `    const trDry = c.createGain(), trWet = c.createGain(), trSum = c.createGain();`;
-if (!s.includes(createMarker)) throw new Error('transient create marker missing');
+// Hard rule: do not alter DELTA ordering. Only isolate transient output back into
+// the same Section band before the existing delta node receives it.
+if (!s.includes('function createStage(c)')) throw new Error('createStage missing');
+
 if (!s.includes('const trBand = c.createBiquadFilter()')) {
-  s = s.replace(createMarker, `${createMarker}\n    const trBand = c.createBiquadFilter(); trBand.type = 'bandpass';`);
+  const createRe = /(const trDry = c\.createGain\(\),\s*trWet = c\.createGain\(\),\s*trSum = c\.createGain\(\);)/;
+  if (!createRe.test(s)) throw new Error('transient create node marker missing');
+  s = s.replace(createRe, `$1\n    const trBand = c.createBiquadFilter(); trBand.type = 'bandpass';`);
 }
 
-if (s.includes('    trSum.connect(delta);')) {
-  s = s.replace('    trSum.connect(delta);', '    trSum.connect(trBand);\n    trBand.connect(delta);');
-} else if (!s.includes('trBand.connect(delta)')) {
-  throw new Error('transient delta routing marker missing');
+if (s.includes('trSum.connect(delta);')) {
+  s = s.replace(/trSum\.connect\(delta\);/g, 'trSum.connect(trBand);\n    trBand.connect(delta);');
+}
+if (!s.includes('trSum.connect(trBand);') || !s.includes('trBand.connect(delta);')) {
+  throw new Error('transient output was not isolated before DELTA');
 }
 
-// Keep the stage object complete for both legacy and DELTA-v15 build shapes.
-if (s.includes('trDry, trWet, trSum, delta, out,')) {
-  s = s.replace('trDry, trWet, trSum, delta, out,', 'trDry, trWet, trSum, trBand, delta, out,');
-} else if (!s.includes('trSum, trBand')) {
-  throw new Error('transient return marker missing');
+// Return object: insert the isolation node without changing any existing fields/order.
+if (!/trDry,\s*trWet,\s*trSum,\s*trBand,\s*delta/.test(s)) {
+  const returnRe = /(trDry,\s*trWet,\s*trSum),\s*(delta,\s*out)/;
+  if (!returnRe.test(s)) throw new Error('stage return marker missing');
+  s = s.replace(returnRe, '$1, trBand, $2');
 }
 
+// Sync isolation filter to the same frequency/Q as the Section splitter.
 if (!s.includes('s.trBand.frequency.setTargetAtTime')) {
-  const v15 = `      s.split.frequency.setTargetAtTime(freq, now, .004);\n      s.split.Q.setTargetAtTime(clamp(q, .25, 18), now, .004);`;
-  const legacy = `      s.split.frequency.setTargetAtTime(b.freq, now, .004);\n      s.split.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);`;
-  if (s.includes(v15)) {
-    s = s.replace(v15, `${v15}\n      s.trBand.frequency.setTargetAtTime(freq, now, .004);\n      s.trBand.Q.setTargetAtTime(clamp(q, .25, 18), now, .004);`);
-  } else if (s.includes(legacy)) {
-    s = s.replace(legacy, `${legacy}\n      s.trBand.frequency.setTargetAtTime(b.freq, now, .004);\n      s.trBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);`);
+  const freqRe = /(s\.split\.frequency\.setTargetAtTime\([^\n]+\);\s*\n\s*s\.split\.Q\.setTargetAtTime\([^\n]+\);)/;
+  if (!freqRe.test(s)) throw new Error('Section split sync marker missing');
+  const match = s.match(freqRe)[1];
+  if (match.includes('freq')) {
+    s = s.replace(freqRe, `${match}\n      s.trBand.frequency.setTargetAtTime(freq, now, .004);\n      s.trBand.Q.setTargetAtTime(clamp(q, .25, 18), now, .004);`);
   } else {
-    throw new Error('transient sync marker missing');
+    s = s.replace(freqRe, `${match}\n      s.trBand.frequency.setTargetAtTime(b.freq, now, .004);\n      s.trBand.Q.setTargetAtTime(clamp(b.q, .25, 18), now, .004);`);
   }
 }
 
-if (!s.includes('trSum.connect(trBand)') || !s.includes('trBand.connect(delta)')) throw new Error('transient isolation was not installed');
-if (!s.includes('s.trBand.frequency.setTargetAtTime')) throw new Error('transient isolation frequency sync missing');
-if (s.includes('trSum.connect(delta)')) throw new Error('unisolated transient path still present');
+if (!s.includes('s.trBand.frequency.setTargetAtTime') || !s.includes('s.trBand.Q.setTargetAtTime')) {
+  throw new Error('transient isolation filter is not parameter-synced');
+}
+if (s.includes('trSum.connect(delta);')) throw new Error('unisolated transient path remains');
 
 fs.writeFileSync(path, s, 'utf8');
-console.log('PASS transient output re-isolated to each Section band without changing DELTA routing order.');
+console.log('PASS transient output re-isolated to each Section band; existing DELTA ordering untouched.');
