@@ -11,45 +11,52 @@ function replaceBetween(text, startMarker, endMarker, replacement) {
   return text.slice(0, a) + replacement + text.slice(b);
 }
 
+// Normal Section graph is preserved. DELTA gets a completely independent graph:
+// source -> Section FREQ/Q band-isolation -> dedicated EQ -> De-noise -> Punch/Sustain -> Wet
+//                                      \-> Dry -------------------------------> Wet - Dry
 const createStage = `  function createStage(c) {
     const eq = c.createBiquadFilter(); eq.type = 'peaking';
     const split = c.createBiquadFilter(); split.type = 'bandpass';
     const dryFull = c.createGain();
     const eqInvert = c.createGain(); eqInvert.gain.value = -1;
     const eqDelta = c.createGain();
-    const out = c.createGain();
+    const dryBand = c.createGain();
+    const bandInvert = c.createGain(); bandInvert.gain.value = -1;
     const dnIn = c.createGain(), dnSum = c.createGain();
     const trDry = c.createGain(), trWet = c.createGain(), trSum = c.createGain();
-    const spectralInvert = c.createGain(); spectralInvert.gain.value = -1;
-    const spectralDelta = c.createGain();
+    const delta = c.createGain();
+    const out = c.createGain();
 
+    // Normal Section processing.
     dryFull.connect(eqInvert);
     eqInvert.connect(eqDelta);
-    eq.connect(eqDelta);
     eq.connect(out);
-    eqDelta.connect(out);
+    eq.connect(eqDelta);
+    eqDelta.connect(delta);
 
+    split.connect(dryBand);
     split.connect(dnIn);
     dnIn.connect(dnSum);
     dnSum.connect(trDry);
     dnSum.connect(trWet);
     trDry.connect(trSum);
     trWet.connect(trSum);
-    split.connect(spectralInvert);
-    spectralInvert.connect(spectralDelta);
-    trSum.connect(spectralDelta);
-    spectralDelta.connect(out);
+    dryBand.connect(bandInvert);
+    bandInvert.connect(delta);
+    trSum.connect(delta);
+    delta.connect(out);
 
-    // Completely independent DELTA graph for this Section.
-    const deltaBandHP1 = c.createBiquadFilter(); deltaBandHP1.type = 'highpass';
-    const deltaBandHP2 = c.createBiquadFilter(); deltaBandHP2.type = 'highpass';
-    const deltaBandLP1 = c.createBiquadFilter(); deltaBandLP1.type = 'lowpass';
-    const deltaBandLP2 = c.createBiquadFilter(); deltaBandLP2.type = 'lowpass';
+    // DELTA: absolutely independent Section-local graph.
+    // The first DSP operation is the Section's own FREQ/Q band isolation.
+    // No neighbouring Section frequency is used anywhere.
+    const deltaBandBP1 = c.createBiquadFilter(); deltaBandBP1.type = 'bandpass';
+    const deltaBandBP2 = c.createBiquadFilter(); deltaBandBP2.type = 'bandpass';
     const deltaBand = c.createGain();
 
     const deltaDry = c.createGain();
     const deltaDryDelay = c.createDelay(2);
     const deltaDryInvert = c.createGain(); deltaDryInvert.gain.value = -1;
+
     const deltaEQ = c.createBiquadFilter(); deltaEQ.type = 'peaking';
     const deltaDenoiseIn = c.createGain();
     const deltaDenoiseSum = c.createGain();
@@ -58,16 +65,15 @@ const createStage = `  function createStage(c) {
     const deltaTransientSum = c.createGain();
     const deltaWet = c.createGain();
     const deltaOut = c.createGain();
-    const deltaMute = c.createGain();
+    const deltaMute = c.createGain(); deltaMute.gain.value = 0;
 
-    deltaBandHP1.connect(deltaBandHP2);
-    deltaBandHP2.connect(deltaBandLP1);
-    deltaBandLP1.connect(deltaBandLP2);
-    deltaBandLP2.connect(deltaBand);
-
-    // Identical isolated Section signal splits into DRY and dedicated WET processing.
+    // FREQ/Q isolation comes FIRST, then the exact same isolated signal is split.
+    deltaBandBP1.connect(deltaBandBP2);
+    deltaBandBP2.connect(deltaBand);
     deltaBand.connect(deltaDry);
     deltaBand.connect(deltaEQ);
+
+    // Dedicated processing lives entirely inside this already-isolated frequency/Q band.
     deltaEQ.connect(deltaDenoiseIn);
     deltaDenoiseIn.connect(deltaDenoiseSum);
     deltaDenoiseSum.connect(deltaTransientDry);
@@ -76,20 +82,19 @@ const createStage = `  function createStage(c) {
     deltaTransientWet.connect(deltaTransientSum);
     deltaTransientSum.connect(deltaWet);
 
+    // Wet - Dry, with Dry latency aligned to the De-noise processor when active.
     deltaDry.connect(deltaDryDelay);
     deltaDryDelay.connect(deltaDryInvert);
     deltaWet.connect(deltaOut);
     deltaDryInvert.connect(deltaOut);
     deltaOut.connect(deltaMute);
-    deltaMute.gain.value = 0;
 
     return {
-      eq, split, dryFull, eqInvert, eqDelta,
-      dnIn, dnSum, trDry, trWet, trSum,
-      spectralInvert, spectralDelta, out,
-      deltaBandHP1, deltaBandHP2, deltaBandLP1, deltaBandLP2, deltaBand,
-      deltaDry, deltaDryDelay, deltaDryInvert, deltaEQ,
-      deltaDenoiseIn, deltaDenoiseSum,
+      eq, split, dryFull, eqInvert, eqDelta, dryBand, bandInvert,
+      dnIn, dnSum, trDry, trWet, trSum, delta, out,
+      deltaBandBP1, deltaBandBP2, deltaBand,
+      deltaDry, deltaDryDelay, deltaDryInvert,
+      deltaEQ, deltaDenoiseIn, deltaDenoiseSum,
       deltaTransientDry, deltaTransientWet, deltaTransientSum,
       deltaWet, deltaOut, deltaMute,
       denoise: null, transient: null,
@@ -141,23 +146,12 @@ s = s.replace(ensureOld, ensureNew);
 const syncGraph = `  function syncGraph() {
     if (!graph || !ctx) return;
     const now = ctx.currentTime;
-    const data = currentData();
-    const ordered = data.map((b, i) => ({ i, f: Math.max(20, Number(b.freq)) })).sort((a, b) => a.f - b.f);
-    const lowEdge = 20;
-    const highEdge = Math.max(1000, ctx.sampleRate * 0.46);
-    const boundaries = new Map();
-    for (let r = 0; r < ordered.length; r++) {
-      const cur = ordered[r];
-      const lo = r === 0 ? lowEdge : Math.sqrt(ordered[r - 1].f * cur.f);
-      const hi = r === ordered.length - 1 ? highEdge : Math.sqrt(cur.f * ordered[r + 1].f);
-      boundaries.set(cur.i, { lo, hi });
-    }
-
-    data.forEach((b, i) => {
+    currentData().forEach((b, i) => {
       const s = graph.stages[i];
       const freq = clamp(Number(b.freq), 20, Math.max(30, ctx.sampleRate * 0.45));
       const q = clamp(Number(b.q), 0.1, 20);
 
+      // Normal graph.
       s.eq.frequency.setTargetAtTime(freq, now, .004);
       s.eq.Q.setTargetAtTime(q, now, .004);
       s.eq.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .004);
@@ -170,29 +164,26 @@ const syncGraph = `  function syncGraph() {
       s.transient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.transient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
 
-      const edge = boundaries.get(i);
-      const lo = clamp(edge.lo, lowEdge, highEdge * .90);
-      const hi = clamp(edge.hi, lo * 1.02, highEdge);
-      const rq = 0.70710678;
-      s.deltaBandHP1.frequency.setTargetAtTime(lo, now, .004);
-      s.deltaBandHP1.Q.setTargetAtTime(rq, now, .004);
-      s.deltaBandHP2.frequency.setTargetAtTime(lo, now, .004);
-      s.deltaBandHP2.Q.setTargetAtTime(rq, now, .004);
-      s.deltaBandLP1.frequency.setTargetAtTime(hi, now, .004);
-      s.deltaBandLP1.Q.setTargetAtTime(rq, now, .004);
-      s.deltaBandLP2.frequency.setTargetAtTime(hi, now, .004);
-      s.deltaBandLP2.Q.setTargetAtTime(rq, now, .004);
+      // DELTA isolation: EVERY Section uses ONLY its own FREQ + Q.
+      // This is the first operation. There is no inter-Section crossover math.
+      s.deltaBandBP1.frequency.setTargetAtTime(freq, now, .004);
+      s.deltaBandBP1.Q.setTargetAtTime(q, now, .004);
+      s.deltaBandBP2.frequency.setTargetAtTime(freq, now, .004);
+      s.deltaBandBP2.Q.setTargetAtTime(q, now, .004);
 
+      // Dedicated delta EQ uses the same FREQ/Q center and Section gain setting.
       s.deltaEQ.frequency.setTargetAtTime(freq, now, .004);
       s.deltaEQ.Q.setTargetAtTime(q, now, .004);
       s.deltaEQ.gain.setTargetAtTime(b.bypass ? 0 : b.gain, now, .004);
+
+      // De-noise / Punch / Sustain are downstream of the isolated FREQ/Q signal.
       s.deltaDenoise?.parameters.get('amount')?.setTargetAtTime(b.bypass ? 0 : b.denoise, now, .004);
       s.deltaTransientDry.gain.setTargetAtTime(b.bypass ? 1 : 1 - mix, now, .004);
       s.deltaTransientWet.gain.setTargetAtTime(b.bypass ? 0 : mix, now, .004);
       s.deltaTransient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.deltaTransient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
 
-      // Den­oise processor is true sample-for-sample bypass at 0%, so latency compensation is dynamic.
+      // De-noise is true zero-latency bypass at 0%; compensate only when active.
       const denoiseActive = !b.bypass && Number(b.denoise) > 0;
       const latencySamples = denoiseActive ? DELTA_DENOISE_LATENCY_SAMPLES : 0;
       s.deltaDryDelay.delayTime.setTargetAtTime(latencySamples / ctx.sampleRate, now, .004);
@@ -208,13 +199,18 @@ const playback = `  function connectPlayback() {
     const le = loopEnd > loopStart ? loopEnd : buffer.duration;
     source.loop = loop; source.loopStart = ls; source.loopEnd = le;
     if (bypassAll) { source.connect(ctx.destination); return; }
+
     if (deltaBand) {
-      for (const stage of graph.stages) { try { stage.deltaMute.disconnect(graph.master); } catch (_) {} }
+      // DELTA NEVER enters any other Section's serial chain.
+      for (const stage of graph.stages) {
+        try { stage.deltaMute.disconnect(graph.master); } catch (_) {}
+      }
       const selected = graph.stages[deltaBand - 1];
-      source.connect(selected.deltaBandHP1);
+      source.connect(selected.deltaBandBP1);
       selected.deltaMute.connect(graph.master);
       return;
     }
+
     let node = source;
     for (const s of graph.stages) {
       node.connect(s.dryFull);
@@ -226,15 +222,25 @@ const playback = `  function connectPlayback() {
   }`;
 s = replaceBetween(s, '  function connectPlayback() {', '\n\n  function restartAtCurrentPosition()', playback);
 
-s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta10');
-s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta10');
+s = s.replace(/denoise-processor\.js\?v=[^'"\)]+/g, 'denoise-processor.js?v=delta11');
+s = s.replace(/transient-processor\.js\?v=[^'"\)]+/g, 'transient-processor.js?v=delta11');
 
-for (const marker of ['deltaBandHP1','deltaBandHP2','deltaBandLP1','deltaBandLP2','deltaEQ','deltaDenoise','deltaTransient','deltaDryDelay','DELTA_DENOISE_LATENCY_SAMPLES = 1024','deltaDryInvert','deltaMute','source.connect(selected.deltaBandHP1)','selected.deltaMute.connect(graph.master)']) {
+for (const marker of [
+  'deltaBandBP1','deltaBandBP2','deltaEQ','deltaDenoise','deltaTransient',
+  'deltaDryDelay','deltaDryInvert','deltaMute',
+  'DELTA_DENOISE_LATENCY_SAMPLES = 1024',
+  'source.connect(selected.deltaBandBP1)',
+  'selected.deltaMute.connect(graph.master)',
+  's.deltaBandBP1.Q.setTargetAtTime(q',
+  's.deltaBandBP2.Q.setTargetAtTime(q'
+]) {
   if (!s.includes(marker)) throw new Error(`Missing DELTA marker: ${marker}`);
 }
-if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA description remains');
+if (s.includes('deltaBandHP1') || s.includes('deltaBandLP1')) throw new Error('Old HP/LP DELTA isolation remains');
+if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA routing remains');
 if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand DELTA remains');
+if (s.includes('boundaries = new Map')) throw new Error('Old inter-Section crossover calculation remains');
 
-fs.writeFileSync('/tmp/app-v10.js', s, 'utf8');
-fs.copyFileSync('/tmp/app-v10.js', 'WebTester/app.js');
-console.log('Generated DELTA v10: isolated 4-band solo -> dedicated processing -> dynamic latency-aligned Wet-minus-Dry.');
+fs.writeFileSync('/tmp/app-delta-q.js', s, 'utf8');
+fs.copyFileSync('/tmp/app-delta-q.js', 'WebTester/app.js');
+console.log('Generated DELTA v11: per-Section FREQ/Q isolation -> dedicated processing -> latency-aligned Wet-minus-Dry.');
