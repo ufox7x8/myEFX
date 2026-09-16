@@ -3,7 +3,7 @@
 
   const BAND_COUNT = 4;
   const KNOB_INFO = {
-    freq: { min: 20, max: 20000, step: 1 },
+    freq: { min: 20, max: 20000, step: 0.1 },
     gain: { min: -24, max: 24, step: 0.1 },
     q: { min: 0.1, max: 20, step: 0.01 },
     denoise: { min: 0, max: 100, step: 1 },
@@ -25,6 +25,8 @@
   let buffer = null;
   let source = null;
   let graph = null;
+  let graphPromise = null;
+  let graphError = '';
   let playing = false;
   let loopEnabled = false;
   let globalBypass = false;
@@ -67,11 +69,7 @@
   }
 
   function formatValue(key, value) {
-    if (key === 'freq') {
-      return value >= 1000
-        ? (value / 1000).toFixed(value >= 10000 ? 1 : 2) + ' kHz'
-        : (value % 1 ? value.toFixed(1) : Math.round(value)) + ' Hz';
-    }
+    if (key === 'freq') return value >= 1000 ? (value / 1000).toFixed(value >= 10000 ? 1 : 2) + ' kHz' : (value % 1 ? value.toFixed(1) : Math.round(value)) + ' Hz';
     if (key === 'gain') return value.toFixed(1) + ' dB';
     if (key === 'q') return value.toFixed(2);
     return Math.round(value) + '%';
@@ -169,15 +167,19 @@
     return audioContext;
   }
 
-  async function ensureGraph() {
+  async function addWorkletModule(ctx, relativePath) {
+    const url = new URL(relativePath, location.href).href;
+    setStatus('載入 DSP：' + relativePath);
+    await ctx.audioWorklet.addModule(url);
+  }
+
+  async function buildGraph() {
     const ctx = ensureAudioContext();
     if (!ctx.audioWorklet) throw new Error('瀏覽器不支援 AudioWorklet。');
-    if (graph) return graph;
 
-    const denoiseUrl = new URL('denoise-processor.js?build=clean650', location.href).href;
-    const transientUrl = new URL('transient-processor.js?build=clean650', location.href).href;
-    await ctx.audioWorklet.addModule(denoiseUrl);
-    await ctx.audioWorklet.addModule(transientUrl);
+    graphError = '';
+    await addWorkletModule(ctx, 'denoise-processor.js');
+    await addWorkletModule(ctx, 'transient-processor.js');
 
     const master = ctx.createGain();
     const analyser = ctx.createAnalyser();
@@ -236,11 +238,25 @@
     return graph;
   }
 
+  async function ensureGraph() {
+    if (graph) return graph;
+    if (graphPromise) return graphPromise;
+    graphPromise = buildGraph().catch(error => {
+      graph = null;
+      graphError = error?.stack || error?.message || String(error);
+      setStatus('DSP 初始化失敗：' + (error?.message || error));
+      console.error('myEFX graph init failed', error);
+      throw error;
+    }).finally(() => {
+      graphPromise = null;
+    });
+    return graphPromise;
+  }
+
   function syncGraph() {
     if (!graph || !audioContext) return;
     const now = audioContext.currentTime;
     const data = currentData();
-
     graph.stages.forEach((stage, i) => {
       const b = data[i];
       stage.band.frequency.setTargetAtTime(b.freq, now, 0.003);
@@ -257,7 +273,6 @@
       stage.normalGate.gain.setTargetAtTime(active && !deltaBand ? 1 : 0, now, 0.003);
       stage.deltaGate.gain.setTargetAtTime(active && deltaBand === i + 1 ? 1 : 0, now, 0.003);
     });
-
     graph.dryMaster.gain.setTargetAtTime(globalBypass || !deltaBand ? 1 : 0, now, 0.003);
     graph.normalMaster.gain.setTargetAtTime(globalBypass || deltaBand ? 0 : 1, now, 0.003);
     graph.deltaMaster.gain.setTargetAtTime(globalBypass ? 0 : (deltaBand ? 1 : 0), now, 0.003);
@@ -313,6 +328,7 @@
     } catch (error) {
       playing = false;
       disconnectSource();
+      if (!graphError) graphError = error?.stack || error?.message || String(error);
       setStatus('播放失敗：' + (error?.message || error));
       console.error(error);
     }
@@ -344,7 +360,7 @@
   }
 
   function restartPlaybackAtCurrentPosition() {
-    if (!playing || !buffer || !audioContext) return;
+    if (!playing || !buffer || !audioContext || !graph) return;
     const elapsed = Math.max(0, audioContext.currentTime - startedAt);
     const [a, b] = activeLoopBounds();
     if (loopEnabled && b > a) {
@@ -378,7 +394,7 @@
     const p = clamp(progress, 0, 1);
     if ($('cursorIn')) $('cursorIn').style.left = (p * 100) + '%';
     if ($('cursorOut')) $('cursorOut').style.left = (p * 100) + '%';
-    $('time').textContent = buffer ? p.toFixed(4).replace('0.', '') && `${(p * buffer.duration).toFixed(2)} / ${buffer.duration.toFixed(2)} s` : '0.00 / 0.00 s';
+    $('time').textContent = buffer ? `${(p * buffer.duration).toFixed(2)} / ${buffer.duration.toFixed(2)} s` : '0.00 / 0.00 s';
   }
 
   function fft(re, im) {
@@ -387,10 +403,7 @@
       let bit = n >> 1;
       for (; j & bit; bit >>= 1) j ^= bit;
       j ^= bit;
-      if (i < j) {
-        [re[i], re[j]] = [re[j], re[i]];
-        [im[i], im[j]] = [im[j], im[i]];
-      }
+      if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
     }
     for (let len = 2; len <= n; len <<= 1) {
       const angle = -2 * Math.PI / len;
@@ -438,21 +451,14 @@
     const g = canvas.getContext('2d');
     g.fillStyle = '#02070a';
     g.fillRect(0, 0, width, height);
-
-    const input = buffer.getChannelData(0);
-    const N = 1024;
-    const bins = N / 2;
-    const columns = Math.min(900, width);
-    const hop = Math.max(1, Math.floor(input.length / Math.max(1, columns - 1)));
-    const re = new Float64Array(N);
-    const im = new Float64Array(N);
-
+    const input = buffer.getChannelData(0), N = 1024, bins = N / 2;
+    const columns = Math.min(900, width), hop = Math.max(1, Math.floor(input.length / Math.max(1, columns - 1)));
+    const re = new Float64Array(N), im = new Float64Array(N);
     for (let x = 0; x < columns; x++) {
       const start = Math.min(x * hop, Math.max(0, input.length - N));
       for (let n = 0; n < N; n++) {
         const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / (N - 1));
-        re[n] = input[start + n] * window;
-        im[n] = 0;
+        re[n] = input[start + n] * window; im[n] = 0;
       }
       fft(re, im);
       for (let y = 0; y < height; y++) {
@@ -470,18 +476,12 @@
     }
   }
 
-  function drawInputSpectrogram() {
-    if (buffer) drawSpectrogram($('specIn'), false);
-  }
-
+  function drawInputSpectrogram() { if (buffer) drawSpectrogram($('specIn'), false); }
   function scheduleProcessedRender() {
     if (!buffer) return;
     clearTimeout(renderTimer);
     const serial = ++renderSerial;
-    renderTimer = setTimeout(() => {
-      if (serial !== renderSerial) return;
-      drawSpectrogram($('specOut'), true);
-    }, 60);
+    renderTimer = setTimeout(() => { if (serial === renderSerial) drawSpectrogram($('specOut'), true); }, 60);
   }
 
   async function loadFile(file) {
@@ -490,93 +490,56 @@
       stopPlayback();
       const ctx = ensureAudioContext();
       const arrayBuffer = await file.arrayBuffer();
-      const decoded = await ctx.decodeAudioData(arrayBuffer);
-      buffer = decoded;
-      offset = 0;
-      loopEnabled = false;
-      loopStart = 0;
-      loopEnd = 0;
-      deltaBand = 0;
-      globalBypass = false;
+      buffer = await ctx.decodeAudioData(arrayBuffer);
+      offset = 0; loopEnabled = false; loopStart = 0; loopEnd = 0; deltaBand = 0; globalBypass = false;
       $('bypassAll').textContent = 'BYPASS OFF';
       $('bypassAll').classList.remove('active');
-      $('fileInfo').textContent = `${file.name} · ${decoded.sampleRate} Hz · ${decoded.numberOfChannels} ch · ${decoded.duration.toFixed(2)} s`;
+      $('fileInfo').textContent = `${file.name} · ${buffer.sampleRate} Hz · ${buffer.numberOfChannels} ch · ${buffer.duration.toFixed(2)} s`;
       $('dropUi').style.display = 'none';
       $('loop').textContent = 'LOOP OFF';
       $('loop').classList.remove('active');
-      clearRangeUI();
-      setCursor(0);
-      updateDeltaUI();
-      drawInputSpectrogram();
-      scheduleProcessedRender();
+      clearRangeUI(); setCursor(0); updateDeltaUI(); drawInputSpectrogram(); scheduleProcessedRender();
       setStatus('音檔已載入。');
     } catch (error) {
-      buffer = null;
-      $('dropUi').style.display = '';
-      setStatus('音檔載入失敗：' + (error?.message || error));
-      console.error(error);
+      buffer = null; $('dropUi').style.display = ''; setStatus('音檔載入失敗：' + (error?.message || error)); console.error(error);
     }
   }
 
-  function clearRangeUI() {
-    ['rangeIn', 'rangeOut'].forEach(id => $(id)?.classList.remove('show'));
-  }
-
+  function clearRangeUI() { ['rangeIn', 'rangeOut'].forEach(id => $(id)?.classList.remove('show')); }
   function drawSelection(which, start, end) {
     const range = $(which === 'in' ? 'rangeIn' : 'rangeOut');
     if (!range) return;
-    range.style.left = (start * 100) + '%';
-    range.style.width = ((end - start) * 100) + '%';
-    range.classList.add('show');
+    range.style.left = (start * 100) + '%'; range.style.width = ((end - start) * 100) + '%'; range.classList.add('show');
   }
-
   function rangeProgress(frame, event) {
     const rect = frame.getBoundingClientRect();
     return clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
   }
-
   function bindRange(which) {
     const frame = $(which === 'in' ? 'inputFrame' : 'outputFrame');
     if (!frame) return;
     frame.addEventListener('pointerdown', event => {
       if (event.button !== 0 || !buffer || event.target.closest('.drop-card')) return;
-      rangeDrag = { which, start: rangeProgress(frame, event) };
-      frame.setPointerCapture?.(event.pointerId);
+      rangeDrag = { which, start: rangeProgress(frame, event) }; frame.setPointerCapture?.(event.pointerId);
     });
     frame.addEventListener('pointermove', event => {
       if (!rangeDrag || rangeDrag.which !== which) return;
-      const x = rangeProgress(frame, event);
-      drawSelection(which, Math.min(rangeDrag.start, x), Math.max(rangeDrag.start, x));
+      const x = rangeProgress(frame, event); drawSelection(which, Math.min(rangeDrag.start, x), Math.max(rangeDrag.start, x));
     });
     frame.addEventListener('pointerup', event => {
       if (!rangeDrag || rangeDrag.which !== which) return;
-      const x = rangeProgress(frame, event);
-      const a = Math.min(rangeDrag.start, x);
-      const b = Math.max(rangeDrag.start, x);
-      rangeDrag = null;
+      const x = rangeProgress(frame, event), a = Math.min(rangeDrag.start, x), b = Math.max(rangeDrag.start, x); rangeDrag = null;
       if (b - a < 0.01) return;
-      loopStart = a * buffer.duration;
-      loopEnd = b * buffer.duration;
-      loopEnabled = true;
-      offset = loopStart;
-      drawSelection('in', a, b);
-      drawSelection('out', a, b);
-      $('loop').textContent = `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s`;
-      $('loop').classList.add('active');
+      loopStart = a * buffer.duration; loopEnd = b * buffer.duration; loopEnabled = true; offset = loopStart;
+      drawSelection('in', a, b); drawSelection('out', a, b);
+      $('loop').textContent = `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s`; $('loop').classList.add('active');
       if (playing) restartPlaybackAtCurrentPosition();
       setStatus(`LOOP 範圍 ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)} s`);
     });
     frame.addEventListener('pointercancel', () => { rangeDrag = null; });
     frame.addEventListener('dblclick', event => {
-      event.preventDefault();
-      loopEnabled = false;
-      loopStart = 0;
-      loopEnd = 0;
-      offset = 0;
-      clearRangeUI();
-      $('loop').textContent = 'LOOP OFF';
-      $('loop').classList.remove('active');
-      setStatus('已清除 LOOP 範圍');
+      event.preventDefault(); loopEnabled = false; loopStart = 0; loopEnd = 0; offset = 0; clearRangeUI();
+      $('loop').textContent = 'LOOP OFF'; $('loop').classList.remove('active'); setStatus('已清除 LOOP 範圍');
       if (playing) restartPlaybackAtCurrentPosition();
     });
   }
@@ -584,8 +547,7 @@
   function updateDeltaUI() {
     document.querySelectorAll('[data-action="delta"]').forEach((button, index) => {
       const selected = deltaBand === index + 1;
-      button.classList.toggle('active', selected);
-      button.textContent = selected ? 'DELTA ON' : 'DELTA';
+      button.classList.toggle('active', selected); button.textContent = selected ? 'DELTA ON' : 'DELTA';
     });
     if (deltaBand) globalBypass = false;
     syncGraph();
@@ -595,168 +557,72 @@
   function toggleGlobalBypass() {
     globalBypass = !globalBypass;
     if (globalBypass) deltaBand = 0;
-    $('bypassAll').textContent = globalBypass ? 'BYPASS ON' : 'BYPASS OFF';
-    $('bypassAll').classList.toggle('active', globalBypass);
-    updateDeltaUI();
+    $('bypassAll').textContent = globalBypass ? 'BYPASS ON' : 'BYPASS OFF'; $('bypassAll').classList.toggle('active', globalBypass); updateDeltaUI();
   }
 
   function toggleLoop() {
     loopEnabled = !loopEnabled;
-    if (!loopEnabled) {
-      loopStart = 0;
-      loopEnd = 0;
-      clearRangeUI();
-    } else if (buffer && loopEnd <= loopStart) {
-      loopStart = 0;
-      loopEnd = buffer.duration;
-      drawSelection('in', 0, 1);
-      drawSelection('out', 0, 1);
-    }
-    $('loop').textContent = loopEnabled
-      ? (loopEnd > loopStart ? `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s` : 'LOOP ON')
-      : 'LOOP OFF';
-    $('loop').classList.toggle('active', loopEnabled);
-    if (playing) restartPlaybackAtCurrentPosition();
+    if (!loopEnabled) { loopStart = 0; loopEnd = 0; clearRangeUI(); }
+    else if (buffer && loopEnd <= loopStart) { loopStart = 0; loopEnd = buffer.duration; drawSelection('in', 0, 1); drawSelection('out', 0, 1); }
+    $('loop').textContent = loopEnabled ? (loopEnd > loopStart ? `LOOP ${loopStart.toFixed(2)}–${loopEnd.toFixed(2)}s` : 'LOOP ON') : 'LOOP OFF';
+    $('loop').classList.toggle('active', loopEnabled); if (playing) restartPlaybackAtCurrentPosition();
   }
 
   function toggleAB() {
-    saveABSlot();
-    abSlot = abSlot === 'A' ? 'B' : 'A';
-    applyBands(abSlot === 'A' ? slotA : slotB, false);
-    $('ab').textContent = 'A/B · ' + abSlot;
-    setStatus('已切換到 Slot ' + abSlot);
+    saveABSlot(); abSlot = abSlot === 'A' ? 'B' : 'A'; applyBands(abSlot === 'A' ? slotA : slotB, false); $('ab').textContent = 'A/B · ' + abSlot; setStatus('已切換到 Slot ' + abSlot);
   }
 
   function bindKnobInput(input) {
-    input.addEventListener('input', () => {
-      renderKnob(input, true);
-      saveABSlot();
-      syncGraph();
-      scheduleProcessedRender();
-    });
+    input.addEventListener('input', () => { renderKnob(input, true); saveABSlot(); syncGraph(); scheduleProcessedRender(); });
     input.addEventListener('change', () => renderKnob(input, false));
   }
 
   function setupUI() {
-    document.querySelectorAll('.knob-input').forEach(input => {
-      bindKnobInput(input);
-      renderKnob(input, false);
-    });
-
+    document.querySelectorAll('.knob-input').forEach(input => { bindKnobInput(input); renderKnob(input, false); });
     document.querySelectorAll('.knob').forEach(knob => {
-      const id = knob.dataset.target;
-      const input = $(id);
-      let lastY = 0;
+      const id = knob.dataset.target, input = $(id); let lastY = 0;
       knob.addEventListener('pointerenter', () => renderKnob(input, true));
       knob.addEventListener('pointerleave', () => { if (!knob.hasPointerCapture?.()) renderKnob(input, false); });
-      knob.addEventListener('pointerdown', event => {
-        event.preventDefault();
-        lastY = event.clientY;
-        knob.classList.add('active');
-        knob.setPointerCapture?.(event.pointerId);
-        renderKnob(input, true);
-      });
-      knob.addEventListener('pointermove', event => {
-        if (!knob.hasPointerCapture?.(event.pointerId)) return;
-        const key = id.replace(/\d+$/, '');
-        setInputValue(input, Number(input.value) + (lastY - event.clientY) * knobDeltaPerPixel(key), true, true);
-        lastY = event.clientY;
-      });
-      const finish = event => {
-        try { knob.releasePointerCapture?.(event.pointerId); } catch (_) {}
-        knob.classList.remove('active');
-        renderKnob(input, false);
-      };
-      knob.addEventListener('pointerup', finish);
-      knob.addEventListener('pointercancel', finish);
-      knob.addEventListener('wheel', event => {
-        event.preventDefault();
-        const key = id.replace(/\d+$/, '');
-        const direction = event.deltaY < 0 ? 1 : -1;
-        setInputValue(input, Number(input.value) + direction * knobDeltaPerPixel(key) * 6, true, true);
-      }, { passive: false });
+      knob.addEventListener('pointerdown', event => { event.preventDefault(); lastY = event.clientY; knob.classList.add('active'); knob.setPointerCapture?.(event.pointerId); renderKnob(input, true); });
+      knob.addEventListener('pointermove', event => { if (!knob.hasPointerCapture?.(event.pointerId)) return; const key = id.replace(/\d+$/, ''); setInputValue(input, Number(input.value) + (lastY - event.clientY) * knobDeltaPerPixel(key), true, true); lastY = event.clientY; });
+      const finish = event => { try { knob.releasePointerCapture?.(event.pointerId); } catch (_) {} knob.classList.remove('active'); renderKnob(input, false); };
+      knob.addEventListener('pointerup', finish); knob.addEventListener('pointercancel', finish);
+      knob.addEventListener('wheel', event => { event.preventDefault(); const key = id.replace(/\d+$/, ''); setInputValue(input, Number(input.value) + (event.deltaY < 0 ? 1 : -1) * knobDeltaPerPixel(key) * 6, true, true); }, { passive: false });
       knob.addEventListener('dblclick', () => setInputValue(input, Number(input.defaultValue), true, true));
     });
-
     $('file').addEventListener('change', event => loadFile(event.target.files?.[0]));
-    $('dropUi').addEventListener('dragover', event => event.preventDefault());
-    $('dropUi').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
-    $('inputFrame').addEventListener('dragover', event => event.preventDefault());
-    $('inputFrame').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
-
-    $('play').addEventListener('click', togglePlay);
-    $('stop').addEventListener('click', stopPlayback);
-    $('loop').addEventListener('click', toggleLoop);
-    $('bypassAll').addEventListener('click', toggleGlobalBypass);
-    $('ab').addEventListener('click', toggleAB);
-    $('sortBtn').addEventListener('click', sortBands);
-    $('resetAll').addEventListener('click', resetAll);
-    $('resetBands').addEventListener('click', resetAll);
-
+    $('dropUi').addEventListener('dragover', event => event.preventDefault()); $('dropUi').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
+    $('inputFrame').addEventListener('dragover', event => event.preventDefault()); $('inputFrame').addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer?.files?.[0]); });
+    $('play').addEventListener('click', togglePlay); $('stop').addEventListener('click', stopPlayback); $('loop').addEventListener('click', toggleLoop); $('bypassAll').addEventListener('click', toggleGlobalBypass); $('ab').addEventListener('click', toggleAB);
+    $('sortBtn').addEventListener('click', sortBands); $('resetAll').addEventListener('click', resetAll); $('resetBands').addEventListener('click', resetAll);
     document.querySelectorAll('.band').forEach(card => {
       const index = Number(card.dataset.band);
-      card.querySelector('[data-action="bypass"]').addEventListener('click', () => {
-        setBandBypass(index, !$('byp' + index).classList.contains('on'));
-      });
-      card.querySelector('[data-action="delta"]').addEventListener('click', () => {
-        deltaBand = deltaBand === index ? 0 : index;
-        updateDeltaUI();
-      });
+      card.querySelector('[data-action="bypass"]').addEventListener('click', () => setBandBypass(index, !$('byp' + index).classList.contains('on')));
+      card.querySelector('[data-action="delta"]').addEventListener('click', () => { deltaBand = deltaBand === index ? 0 : index; updateDeltaUI(); });
       card.querySelector('[data-action="reset"]').addEventListener('click', () => resetBand(index));
     });
-
-    bindRange('in');
-    bindRange('out');
-
-    window.addEventListener('keydown', event => {
-      if (event.code !== 'Space' || event.repeat) return;
-      const target = event.target;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      event.preventDefault();
-      togglePlay();
-    });
-
-    window.addEventListener('resize', () => {
-      if (!buffer) return;
-      drawInputSpectrogram();
-      scheduleProcessedRender();
-    });
+    bindRange('in'); bindRange('out');
+    window.addEventListener('keydown', event => { if (event.code !== 'Space' || event.repeat) return; const target = event.target; if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return; event.preventDefault(); togglePlay(); });
+    window.addEventListener('resize', () => { if (!buffer) return; drawInputSpectrogram(); scheduleProcessedRender(); });
   }
 
   function meterRms() {
     if (!graph) return 0;
     const data = new Float32Array(graph.analyser.fftSize);
     graph.analyser.getFloatTimeDomainData(data);
-    let sum = 0;
-    for (const x of data) sum += x * x;
+    let sum = 0; for (const sample of data) sum += sample * sample;
     return Math.sqrt(sum / data.length);
   }
 
   function debugState() {
     return {
-      loaded: Boolean(buffer),
-      playing,
-      loopEnabled,
-      globalBypass,
-      deltaBand,
-      loopStart,
-      loopEnd,
-      offset,
-      slot: abSlot,
-      graphReady: Boolean(graph),
+      loaded: Boolean(buffer), playing, loopEnabled, globalBypass, deltaBand, loopStart, loopEnd, offset, slot: abSlot,
+      graphReady: Boolean(graph), graphLoading: Boolean(graphPromise), graphError, audioState: audioContext?.state || 'none',
       bands: currentData()
     };
   }
 
-  window.myEFX = {
-    loadFile,
-    togglePlay,
-    stopPlayback,
-    currentData,
-    debugState,
-    meterRms
-  };
-
+  window.myEFX = { loadFile, togglePlay, stopPlayback, currentData, debugState, meterRms };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupUI, { once: true });
   else setupUI();
 })();
