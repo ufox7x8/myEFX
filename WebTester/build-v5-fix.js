@@ -18,13 +18,19 @@ function replaceBetween(text, startMarker, endMarker, replacement) {
 //
 // Each Section gets its own isolated frequency region:
 //   source -> HP4 -> LP4 -> isolated Section signal
-//                         |-> DRY
+//                         |-> DRY reference (latency aligned)
 //                         |-> dedicated DELTA EQ -> De-noise -> Transient -> WET
-//                         \-> DELTA = WET - DRY
+//                         \\-> DELTA = WET - DRY
 //
 // DELTA playback connects ONLY the selected Section's deltaMute to master.
 // No previous/next Section is traversed or mixed.
 // ============================================================================
+
+// The current De-noise worklet uses a 1024-sample analysis window and begins
+// output after that window is filled. The DELTA dry reference is therefore
+// delayed by exactly 1024 samples so Wet/DRY subtraction measures processing
+// difference rather than an artificial time-offset difference.
+const DELTA_DENOISE_LATENCY_SAMPLES = 1024;
 
 const createStage = `  function createStage(c) {
     // ---------------- NORMAL GRAPH ----------------
@@ -57,8 +63,8 @@ const createStage = `  function createStage(c) {
     spectralDelta.connect(out);
 
     // ---------------- DEDICATED DELTA GRAPH ----------------
-    // 4th-order-style crossover: two identical HP stages followed by two LP
-    // stages. Each Section is therefore an isolated spectral region.
+    // Two HP + two LP filters form a steep isolated spectral region for the
+    // selected Section. Every Section owns its own independent filter chain.
     const deltaBandHP1 = c.createBiquadFilter(); deltaBandHP1.type = 'highpass';
     const deltaBandHP2 = c.createBiquadFilter(); deltaBandHP2.type = 'highpass';
     const deltaBandLP1 = c.createBiquadFilter(); deltaBandLP1.type = 'lowpass';
@@ -66,6 +72,7 @@ const createStage = `  function createStage(c) {
     const deltaBand = c.createGain();
 
     const deltaDry = c.createGain();
+    const deltaDryDelay = c.createDelay(2);
     const deltaDryInvert = c.createGain(); deltaDryInvert.gain.value = -1;
     const deltaEQ = c.createBiquadFilter(); deltaEQ.type = 'peaking';
     const deltaDenoiseIn = c.createGain();
@@ -82,7 +89,7 @@ const createStage = `  function createStage(c) {
     deltaBandLP1.connect(deltaBandLP2);
     deltaBandLP2.connect(deltaBand);
 
-    // SAME isolated samples feed both dry and wet references.
+    // SAME isolated samples feed both references.
     deltaBand.connect(deltaDry);
     deltaBand.connect(deltaEQ);
 
@@ -95,9 +102,14 @@ const createStage = `  function createStage(c) {
     deltaTransientWet.connect(deltaTransientSum);
     deltaTransientSum.connect(deltaWet);
 
-    // Single subtraction: WET + (-DRY).
+    // Denose adds a fixed analysis latency in the current processor. Delay the
+    // dry reference by the same amount before subtraction so DELTA remains a
+    // true Wet-minus-Dry difference instead of an offset signal.
+    deltaDry.connect(deltaDryDelay);
+    deltaDryDelay.connect(deltaDryInvert);
+
+    // Single subtraction: WET + (-DRY_DELAYED).
     deltaWet.connect(deltaOut);
-    deltaDry.connect(deltaDryInvert);
     deltaDryInvert.connect(deltaOut);
 
     // Default hard mute until the selected Section is explicitly routed.
@@ -109,7 +121,7 @@ const createStage = `  function createStage(c) {
       dnIn, dnSum, trDry, trWet, trSum,
       spectralInvert, spectralDelta, out,
       deltaBandHP1, deltaBandHP2, deltaBandLP1, deltaBandLP2, deltaBand,
-      deltaDry, deltaDryInvert, deltaEQ,
+      deltaDry, deltaDryDelay, deltaDryInvert, deltaEQ,
       deltaDenoiseIn, deltaDenoiseSum,
       deltaTransientDry, deltaTransientWet, deltaTransientSum,
       deltaWet, deltaOut, deltaMute,
@@ -120,8 +132,6 @@ const createStage = `  function createStage(c) {
 
 s = replaceBetween(s, '  function createStage(c) {', '\n\n  async function ensureGraph()', createStage);
 
-// Dedicated DELTA worklets are separate nodes so normal playback and DELTA
-// never share a processor input or accumulate parallel signals.
 const ensureOld = `    for (const s of graph.stages) {
       if (!s.denoise) {
         s.denoise = new AudioWorkletNode(c, 'myefx-denoise', { parameterData: { amount: 0 } });
@@ -213,12 +223,12 @@ const syncGraph = `  function syncGraph() {
       s.deltaTransientWet.gain.setTargetAtTime(b.bypass ? 0 : mix, now, .004);
       s.deltaTransient?.parameters.get('punch')?.setTargetAtTime(b.bypass ? 0 : b.punch, now, .004);
       s.deltaTransient?.parameters.get('sustain')?.setTargetAtTime(b.bypass ? 0 : b.sustain, now, .004);
+      s.deltaDryDelay.delayTime.setTargetAtTime(DELTA_DENOISE_LATENCY_SAMPLES / ctx.sampleRate, now, .004);
       s.deltaMute.gain.setTargetAtTime(b.bypass ? 0 : 1, now, .004);
     });
   }`;
 s = replaceBetween(s, '  function syncGraph() {', '\n\n  function disconnectPlayback()', syncGraph);
 
-// Replace the ENTIRE playback router, rather than patching an inner branch.
 const playback = `  function connectPlayback() {
     disconnectPlayback();
     source = ctx.createBufferSource(); source.buffer = buffer;
@@ -228,9 +238,7 @@ const playback = `  function connectPlayback() {
 
     if (bypassAll) { source.connect(ctx.destination); return; }
 
-    // HARD SOLO DELTA.
-    // Before routing the selected Section, remove every Section's old delta
-    // monitor connection. Then connect source directly to ONE splitter only.
+    // HARD SOLO DELTA: selected Section only.
     if (deltaBand) {
       for (const stage of graph.stages) {
         try { stage.deltaMute.disconnect(graph.master); } catch (_) {}
@@ -253,14 +261,14 @@ const playback = `  function connectPlayback() {
   }`;
 s = replaceBetween(s, '  function connectPlayback() {', '\n\n  function restartAtCurrentPosition()', playback);
 
-s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta8');
-s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta8');
+s = s.replace(/denoise-processor\\.js\\?v=[^'"\\)]+/g, 'denoise-processor.js?v=delta9');
+s = s.replace(/transient-processor\\.js\\?v=[^'"\\)]+/g, 'transient-processor.js?v=delta9');
 
 const markers = [
   'deltaBandHP1', 'deltaBandHP2', 'deltaBandLP1', 'deltaBandLP2',
-  'deltaEQ', 'deltaDenoise', 'deltaTransient', 'deltaDryInvert',
-  'deltaMute', 'source.connect(selected.deltaBandHP1)',
-  'selected.deltaMute.connect(graph.master)'
+  'deltaEQ', 'deltaDenoise', 'deltaTransient', 'deltaDryDelay',
+  'DELTA_DENOISE_LATENCY_SAMPLES', 'deltaDryInvert', 'deltaMute',
+  'source.connect(selected.deltaBandHP1)', 'selected.deltaMute.connect(graph.master)'
 ];
 for (const marker of markers) {
   if (!s.includes(marker)) throw new Error(`Missing DELTA marker: ${marker}`);
@@ -268,6 +276,6 @@ for (const marker of markers) {
 if (s.includes('Feed prior sections normally')) throw new Error('Old serial DELTA description remains');
 if (s.includes('wetBandSum')) throw new Error('Old mixed WetBand/DryBand DELTA remains');
 
-fs.writeFileSync('/tmp/app-v8.js', s, 'utf8');
-fs.copyFileSync('/tmp/app-v8.js', 'WebTester/app.js');
-console.log('Generated DELTA v8: isolated 4-band solo -> dedicated processing -> Wet-minus-Dry.');
+fs.writeFileSync('/tmp/app-v9.js', s, 'utf8');
+fs.copyFileSync('/tmp/app-v9.js', 'WebTester/app.js');
+console.log('Generated DELTA v9: isolated 4-band solo -> dedicated processing -> latency-aligned Wet-minus-Dry.');
