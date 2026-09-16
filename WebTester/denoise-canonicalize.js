@@ -1,0 +1,10 @@
+const fs = require('fs');
+const appPath = 'WebTester/app.js';
+const s0 = fs.readFileSync(appPath, 'utf8');
+let s = s0.replace(/DELTA_DENOISE_LATENCY_SAMPLES = 1024/g, 'DELTA_DENOISE_LATENCY_SAMPLES = 4096');
+s = s.replace(/denoise-processor\.js\?v=delta15/g, 'denoise-processor.js?v=delta16');
+s = s.replace(/transient-processor\.js\?v=delta15/g, 'transient-processor.js?v=delta16');
+if (!s.includes('DELTA_DENOISE_LATENCY_SAMPLES = 4096')) throw new Error('4096 latency constant missing');
+if (!s.includes('denoise-processor.js?v=delta16')) throw new Error('delta16 denoise cache missing');
+fs.writeFileSync(appPath, s, 'utf8');
+console.log('Canonicalized DELTA latency=4096 and processor cache=delta16.');
