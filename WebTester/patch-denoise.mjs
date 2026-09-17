@@ -81,5 +81,100 @@ const replacement = String.raw`  // DENOISE_REWRITE_V6: strictly subtractive ada
 const re=/  function makeStage\(\)\{[\s\S]*?\n  function buildGraph\(\)\{/;
 if(!re.test(src))throw new Error('makeStage/buildGraph anchor not found');
 src=src.replace(re,replacement);
+
+const interactionPatch = String.raw`
+/* MYEFX_INTERACTION_PATCH_V2: Shift = fine movement; node wheel = Q. */
+(()=>{
+  const clampLocal=(x,a,b)=>Math.max(a,Math.min(b,x));
+  const rangesLocal=[[20,300],[60,1200],[200,3000],[1000,25000]];
+  const state={drag:null};
+  const isKnobInput=t=>t?.closest?.('.knob[data-target]');
+  const isNode=t=>t?.closest?.('.node');
+  const inputOf=id=>document.getElementById(id);
+  function dispatchInput(el){el.dispatchEvent(new Event('input',{bubbles:true}))}
+  function norm(input,v){
+    const min=Number(input.min),max=Number(input.max),step=Number(input.step)||1;
+    const n=Math.round(clampLocal(v,min,max)/step)*step;
+    const d=(String(step).split('.')[1]||'').length;
+    return Number(n.toFixed(d));
+  }
+  function xForFreqLocal(f,w){const a=Math.log10(20),b=Math.log10(20000);return (Math.log10(clampLocal(f,20,20000))-a)/(b-a)*w}
+  function freqForFineX(x,w){const a=Math.log10(20),b=Math.log10(20000);return Math.pow(10,a+(b-a)*clampLocal(x/w,0,1))}
+  function yForGainLocal(g,h){return h*.5-(clampLocal(g,-12,12)/24)*h*.88}
+
+  document.addEventListener('wheel',e=>{
+    const node=isNode(e.target);
+    if(!node)return;
+    const i=Number(node.dataset.index);
+    if(!Number.isInteger(i))return;
+    const input=inputOf('q'+(i+1));
+    if(!input)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    const step=Number(input.step)||.01;
+    input.value=String(norm(input,Number(input.value)+(e.deltaY<0?step:-step)));
+    dispatchInput(input);
+  },{capture:true,passive:false});
+
+  document.addEventListener('pointerdown',e=>{
+    if(!e.shiftKey)return;
+    const node=isNode(e.target);
+    if(node){
+      const i=Number(node.dataset.index),graph=document.getElementById('uiGraph');
+      if(!graph||!Number.isInteger(i))return;
+      const freqInput=inputOf('freq'+(i+1)),gainInput=inputOf('gain'+(i+1));
+      if(!freqInput||!gainInput)return;
+      const rect=graph.getBoundingClientRect(),freq=Number(freqInput.value),gain=Number(gainInput.value);
+      state.drag={kind:'node',i,pointerId:e.pointerId,rect,startX:xForFreqLocal(freq,rect.width),startY:yForGainLocal(gain,rect.height),startFreq:freq,startGain:gain,node};
+      e.preventDefault();e.stopImmediatePropagation();
+      node.classList.add('dragging');node.setPointerCapture?.(e.pointerId);
+      return;
+    }
+    const knob=isKnobInput(e.target);
+    if(knob){
+      const id=knob.dataset.target,input=inputOf(id),rect=knob.getBoundingClientRect();
+      if(!input)return;
+      state.drag={kind:'knob',pointerId:e.pointerId,input,startY:e.clientY,startValue:Number(input.value),min:Number(input.min),max:Number(input.max),step:Number(input.step)||1};
+      e.preventDefault();e.stopImmediatePropagation();
+      knob.classList.add('active');knob.setPointerCapture?.(e.pointerId);
+    }
+  },{capture:true});
+
+  document.addEventListener('pointermove',e=>{
+    const d=state.drag;
+    if(!d||d.pointerId!==e.pointerId)return;
+    if(d.kind==='node'){
+      const dx=(e.clientX-d.rect.left-d.startX)*.2;
+      const dy=(e.clientY-d.rect.top-d.startY)*.2;
+      const x=d.startX+dx;
+      const y=d.startY+dy;
+      const freq=clampLocal(freqForFineX(x,d.rect.width),rangesLocal[d.i][0],rangesLocal[d.i][1]);
+      const gain=clampLocal((d.rect.height*.5-y)/(d.rect.height*.88)*24,-12,12);
+      const fi=inputOf('freq'+(d.i+1)),gi=inputOf('gain'+(d.i+1));
+      if(fi){fi.value=String(Number(freq.toFixed(1)));dispatchInput(fi)}
+      if(gi){gi.value=String(Number(gain.toFixed(1)));dispatchInput(gi)}
+    }else if(d.kind==='knob'){
+      const amount=(d.startY-e.clientY)*(d.max-d.min)/240*.2;
+      d.input.value=String(norm(d.input,d.startValue+amount));
+      dispatchInput(d.input);
+    }
+    e.preventDefault();e.stopImmediatePropagation();
+  },{capture:true,passive:false});
+
+  document.addEventListener('pointerup',e=>{
+    const d=state.drag;
+    if(!d||d.pointerId!==e.pointerId)return;
+    state.drag=null;
+    d.node?.classList.remove('dragging');
+    const knob=d.kind==='knob'?d.input.closest('.knob[data-target]'):null;
+    knob?.classList.remove('active');
+    e.preventDefault();e.stopImmediatePropagation();
+  },{capture:true,passive:false});
+  document.addEventListener('pointercancel',e=>{
+    if(state.drag?.pointerId===e.pointerId){state.drag=null;e.stopImmediatePropagation()}
+  },{capture:true});
+})();
+`;
+
+src += '\n' + interactionPatch;
 fs.writeFileSync(file,src,'utf8');
-console.log('Embedded DE-NOISE V6 into app-final.js');
+console.log('Embedded DE-NOISE V6 + interaction patch into app-final.js');
