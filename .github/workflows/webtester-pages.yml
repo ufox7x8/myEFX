@@ -30,6 +30,24 @@ jobs:
       - name: Apply DE-NOISE V6 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
+      - name: Apply final UI cleanup
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const app='WebTester/app-final.js';
+          let js=fs.readFileSync(app,'utf8');
+          js=js.replace(/\$\('bypassAll'\)\.textContent=allBypass\?'BYPASS ON':'BYPASS OFF';/g, "$('bypassAll').textContent='⏻';");
+          js=js.replace(/\$\('bypassAll'\)\.textContent='BYPASS OFF';/g, "$('bypassAll').textContent='⏻';");
+          const wheelFix="\n;(()=>{const stopWheel=e=>{if(e.target.closest?.('.topbar,.graph-wrap'))e.preventDefault()};document.addEventListener('wheel',stopWheel,{capture:true,passive:false})})();\n";
+          if(!js.includes("'.topbar,.graph-wrap'"))js+=wheelFix;
+          fs.writeFileSync(app,js,'utf8');
+          const index='WebTester/index-fixed.html';
+          let html=fs.readFileSync(index,'utf8');
+          html=html.replace(/\.social-row\{[^}]*\}/g,'').replace(/\.social\{[^}]*\}/g,'');
+          html=html.replace(/<div class="social-row">[\s\S]*?<\/div><\/aside>/g,'</aside>');
+          fs.writeFileSync(index,html,'utf8');
+          NODE
+
       - name: Run deterministic DE-NOISE and UI regression matrices
         run: |
           node WebTester/denoise-v5-selfcheck.mjs
@@ -61,6 +79,24 @@ jobs:
       - name: Apply DE-NOISE V6 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
+      - name: Apply final UI cleanup
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const app='WebTester/app-final.js';
+          let js=fs.readFileSync(app,'utf8');
+          js=js.replace(/\$\('bypassAll'\)\.textContent=allBypass\?'BYPASS ON':'BYPASS OFF';/g, "$('bypassAll').textContent='⏻';");
+          js=js.replace(/\$\('bypassAll'\)\.textContent='BYPASS OFF';/g, "$('bypassAll').textContent='⏻';");
+          const wheelFix="\n;(()=>{const stopWheel=e=>{if(e.target.closest?.('.topbar,.graph-wrap'))e.preventDefault()};document.addEventListener('wheel',stopWheel,{capture:true,passive:false})})();\n";
+          if(!js.includes("'.topbar,.graph-wrap'"))js+=wheelFix;
+          fs.writeFileSync(app,js,'utf8');
+          const index='WebTester/index-fixed.html';
+          let html=fs.readFileSync(index,'utf8');
+          html=html.replace(/\.social-row\{[^}]*\}/g,'').replace(/\.social\{[^}]*\}/g,'');
+          html=html.replace(/<div class="social-row">[\s\S]*?<\/div><\/aside>/g,'</aside>');
+          fs.writeFileSync(index,html,'utf8');
+          NODE
+
       - name: Validate required files
         run: |
           test -s WebTester/index-fixed.html
@@ -71,6 +107,8 @@ jobs:
           test -s WebTester/ui-browser-selftest.mjs
           grep -q 'DENOISE_REWRITE_V6' WebTester/app-final.js
           grep -q 'ui-frequalizer.js' WebTester/index-fixed.html
+          ! grep -q 'social-row' WebTester/index-fixed.html
+          ! grep -q 'class="social"' WebTester/index-fixed.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
