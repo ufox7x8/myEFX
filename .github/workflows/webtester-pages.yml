@@ -27,33 +27,23 @@ jobs:
       - name: Apply DE-NOISE V6 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
-      - name: Validate DE-NOISE V6 and run focused regression matrix
+      - name: Run deterministic DE-NOISE and UI regression matrices
         run: |
           node WebTester/denoise-v5-selfcheck.mjs
+          node WebTester/ui-selfcheck.mjs
           node --check WebTester/app-final.js
           node --check WebTester/patch-denoise.mjs
-          node --check WebTester/self-test.mjs
-
-      - name: Fix legacy regression harness assertions
-        run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const p = 'WebTester/self-test.mjs';
-          let s = fs.readFileSync(p, 'utf8');
-          s = s.replaceAll("new Event('input',{bubbles:true))});", "new Event('input',{bubbles:true}));});");
-          s = s.replace("DENOISE_REWRITE_V4", "DENOISE_REWRITE_V6");
-          s = s.replace("DENOISE_REWRITE_V5", "DENOISE_REWRITE_V6");
-          s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
-          fs.writeFileSync(p, s);
-          NODE
+          node --check WebTester/ui-frequalizer.js
+          node --check WebTester/ui-selfcheck.mjs
+          node --check WebTester/ui-browser-selftest.mjs
 
       - name: Install browser test runtime
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
 
-      - name: Run browser regression checks
-        run: node WebTester/self-test.mjs
+      - name: Run real-browser UI regression checks
+        run: node WebTester/ui-browser-selftest.mjs
 
   deploy:
     needs: test
@@ -73,7 +63,11 @@ jobs:
           test -s WebTester/index-fixed.html
           test -s WebTester/app-final.js
           test -s WebTester/patch-denoise.mjs
+          test -s WebTester/ui-frequalizer.js
+          test -s WebTester/ui-selfcheck.mjs
+          test -s WebTester/ui-browser-selftest.mjs
           grep -q 'DENOISE_REWRITE_V6' WebTester/app-final.js
+          grep -q 'ui-frequalizer.js' WebTester/index-fixed.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
