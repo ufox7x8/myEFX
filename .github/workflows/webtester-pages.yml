@@ -24,21 +24,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Apply DE-NOISE V4 runtime rewrite
+      - name: Apply DE-NOISE V5 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
-      - name: Add DE-NOISE runtime probe
-        run: node WebTester/patch-denoise-probe.mjs
+      - name: Validate DE-NOISE V5 and run focused regression matrix
+        run: |
+          node WebTester/denoise-v5-selfcheck.mjs
+          node --check WebTester/app-final.js
+          node --check WebTester/patch-denoise.mjs
+          node --check WebTester/self-test.mjs
 
-      - name: Fix regression harness syntax, headless RMS gate and DELTA assertion
+      - name: Fix legacy regression harness assertions
         run: |
           node - <<'NODE'
           const fs = require('fs');
           const p = 'WebTester/self-test.mjs';
           let s = fs.readFileSync(p, 'utf8');
-
           s = s.replaceAll("new Event('input',{bubbles:true))});", "new Event('input',{bubbles:true}));});");
-
+          s = s.replace("DENOISE_REWRITE_V4", "DENOISE_REWRITE_V5");
           const begin = "  await page.locator('#resetAll').click();const denoiseOff=";
           const end = "  const all180=";
           const a = s.indexOf(begin);
@@ -47,18 +50,9 @@ jobs:
             const replacement = `  await page.locator('#resetAll').click();\n  await page.locator('#loop').click();\n  await page.locator('#play').click();\n  await page.waitForTimeout(450);\n  const denoiseProbe = await page.evaluate(() => window.myEFX.debugState().denoiseProbe?.[1] || null);\n  await page.locator('#stop').click();\n  if (!denoiseProbe || denoiseProbe.blocks < 5) fail('DE-NOISE callback did not run: '+JSON.stringify(denoiseProbe));\n  else console.log('DE-NOISE DSP callback probe: PASS', JSON.stringify(denoiseProbe));\n\n`;
             s = s.slice(0, a) + replacement + s.slice(b);
           }
-
           s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
-
           fs.writeFileSync(p, s);
           NODE
-
-      - name: Validate JavaScript syntax
-        run: |
-          node --check WebTester/app-final.js
-          node --check WebTester/patch-denoise.mjs
-          node --check WebTester/patch-denoise-probe.mjs
-          node --check WebTester/self-test.mjs
 
       - name: Install browser test runtime
         run: |
@@ -78,7 +72,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Apply DE-NOISE V4 runtime rewrite
+      - name: Apply DE-NOISE V5 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
       - name: Validate required files
@@ -86,6 +80,7 @@ jobs:
           test -s WebTester/index-fixed.html
           test -s WebTester/app-final.js
           test -s WebTester/patch-denoise.mjs
+          grep -q 'DENOISE_REWRITE_V5' WebTester/app-final.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
