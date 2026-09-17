@@ -24,10 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Apply DE-NOISE V5 runtime rewrite
+      - name: Apply DE-NOISE V6 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
-      - name: Validate DE-NOISE V5 and run focused regression matrix
+      - name: Validate DE-NOISE V6 and run focused regression matrix
         run: |
           node WebTester/denoise-v5-selfcheck.mjs
           node --check WebTester/app-final.js
@@ -41,7 +41,8 @@ jobs:
           const p = 'WebTester/self-test.mjs';
           let s = fs.readFileSync(p, 'utf8');
           s = s.replaceAll("new Event('input',{bubbles:true))});", "new Event('input',{bubbles:true}));});");
-          s = s.replace("DENOISE_REWRITE_V4", "DENOISE_REWRITE_V5");
+          s = s.replace("DENOISE_REWRITE_V4", "DENOISE_REWRITE_V6");
+          s = s.replace("DENOISE_REWRITE_V5", "DENOISE_REWRITE_V6");
           s = s.replace("if(s.delta&&!s.deltaGateTargets.some((x,j)=>x&&j+1===s.delta))errors.push('delta');", "if(s.deltaGateTargets.filter(Boolean).length>1)errors.push('delta-multi');");
           fs.writeFileSync(p, s);
           NODE
@@ -64,7 +65,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Apply DE-NOISE V5 runtime rewrite
+      - name: Apply DE-NOISE V6 runtime rewrite
         run: node WebTester/patch-denoise.mjs
 
       - name: Validate required files
@@ -72,7 +73,7 @@ jobs:
           test -s WebTester/index-fixed.html
           test -s WebTester/app-final.js
           test -s WebTester/patch-denoise.mjs
-          grep -q 'DENOISE_REWRITE_V5' WebTester/app-final.js
+          grep -q 'DENOISE_REWRITE_V6' WebTester/app-final.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
