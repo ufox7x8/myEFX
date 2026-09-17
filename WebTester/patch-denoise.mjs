@@ -6,11 +6,11 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const file = path.join(root, 'app-final.js');
 let src = fs.readFileSync(file, 'utf8');
 
-const replacement = String.raw`  // DENOISE_REWRITE_V5: strictly subtractive adaptive multiband denoise.
-  // IMPORTANT: denoise never reconstructs/sums filtered bands. The processor output
-  // is always input * gain, with gain clamped to <= 1.0. The six bands are analysis
-  // filters only; this prevents phase/addition gain and keeps denoise mathematically
-  // subtractive. EQ / transient / routing outside this stage are unchanged.
+const replacement = String.raw`  // DENOISE_REWRITE_V6: strictly subtractive adaptive multiband denoise.
+  // DE-NOISE itself NEVER adds makeup/protection gain and NEVER multiplies above 1.
+  // The internal subbands are analysis filters only. Their gains are averaged in dB
+  // as attenuation factors, then applied to the Section's already band-limited signal.
+  // Existing EQ / PUNCH / SUSTAIN / DELTA routing remains outside this DSP stage.
   function makeStage(){
     const c=ensureCtx(),band=c.createBiquadFilter(),eq=c.createBiquadFilter(),dry=c.createGain(),neg=c.createGain(),change=c.createGain(),normal=c.createGain(),deltaGate=c.createGain(),proc=c.createScriptProcessor(512,2,2);
     band.type='bandpass';eq.type='peaking';neg.gain.value=-1;
@@ -47,15 +47,15 @@ const replacement = String.raw`  // DENOISE_REWRITE_V5: strictly subtractive ada
       for(let i=0;i<frames;i++){
         let peak=0;for(let cc=0;cc<ch;cc++)peak=Math.max(peak,Math.abs(ins[cc][i]));
         s.fast+=(peak-s.fast)*.24;s.slow+=(peak-s.slow)*.012;
-        const activity=clamp((s.fast-s.slow)/Math.max(s.fast,1e-7),0,1);
         let logG=0,valid=0;
         for(let k=0;k<K;k++){
           const bs=s.bands[k];if(!bs.valid)continue;
           let p=0;for(let cc=0;cc<ch;cc++){const y=filt(bs,ins[cc][i],cc);p+=y*y}p/=Math.max(1,ch);
           const wasQuiet=p<bs.power;
           bs.power+=(p-bs.power)*(wasQuiet?.18:.035);bs.power=Math.max(bs.power,1e-10);
+          const speechActivity=clamp((s.fast-s.slow)/Math.max(s.fast,1e-7),0,1);
           if(p<bs.noise*1.35)bs.noise+=(p-bs.noise)*.045;
-          else if(activity<.08)bs.noise+=(Math.min(p,bs.noise*1.05)-bs.noise)*.012;
+          else if(speechActivity<.08)bs.noise+=(Math.min(p,bs.noise*1.05)-bs.noise)*.012;
           bs.noise=clamp(bs.noise,1e-10,Math.max(bs.power,1e-10));
           const snr=bs.power/(bs.noise+1e-10);
           const w=clamp((snr-1.0)/(snr+1.5),0,1);
@@ -66,10 +66,9 @@ const replacement = String.raw`  // DENOISE_REWRITE_V5: strictly subtractive ada
           bs.gain=clamp(bs.gain,floor,1);
           logG+=Math.log(Math.max(bs.gain,1e-6));valid++;
         }
+        // STRICTLY SUBTRACTIVE: no protection, makeup, normalization, or upward gain.
         let g=valid?Math.exp(logG/valid):1;
-        // Protect clearly active speech/transients; this is protection only, never boost.
-        const protect=clamp(.22*activity,0,.22);
-        g=clamp(g+(1-g)*protect,floor,1);
+        g=clamp(g,floor,1);
         if(s.warm>0){g=1;s.warm--}
         for(let cc=0;cc<ch;cc++)outs[cc][i]=ins[cc][i]*g;
       }
@@ -83,4 +82,4 @@ const re=/  function makeStage\(\)\{[\s\S]*?\n  function buildGraph\(\)\{/;
 if(!re.test(src))throw new Error('makeStage/buildGraph anchor not found');
 src=src.replace(re,replacement);
 fs.writeFileSync(file,src,'utf8');
-console.log('Embedded DE-NOISE V5 into app-final.js');
+console.log('Embedded DE-NOISE V6 into app-final.js');
